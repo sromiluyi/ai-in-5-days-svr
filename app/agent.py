@@ -45,13 +45,15 @@ coordinator_agent = create_coordinator_agent()
 
 # 2. Root Agent: ADK 2.0 Graph Workflow (matches agents-cli-manifest.yaml 'ai_in_5_days_svr')
 from app.workflow import assessment_workflow
+from app.guardrails import PedagogicalSafetyGuardrailPlugin
 
 root_agent = assessment_workflow
 
-# 3. Resumable & Compacting ADK App
+# 3. Resumable, Compacting & Guardrailed ADK App
 app = App(
     root_agent=root_agent,
     name="ai_in_5_days_svr",
     resumability_config=ResumabilityConfig(is_resumable=True),
     events_compaction_config=get_events_compaction_config(),
+    plugins=[PedagogicalSafetyGuardrailPlugin()],
 )
