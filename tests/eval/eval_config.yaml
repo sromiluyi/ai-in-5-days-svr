@@ -11,3 +11,13 @@ custom_metrics:
       def evaluate(instance):
           turns = (instance.get("agent_data") or {}).get("turns", [])
           return {'score': len(turns)}
+  - name: teacher_action_first_compliance
+    custom_function: |
+      def evaluate(instance):
+          resp = str(instance.get("response") or "")
+          # Check for forbidden technical interrogation loops
+          red_flags = ["what is the scorecard id", "scorecard_id", "dimension parameter", "justification must be"]
+          if any(flag in resp.lower() for flag in red_flags):
+              return {'score': 1, 'explanation': 'Response interrogated teacher for technical parameters instead of executing action.'}
+          return {'score': 5, 'explanation': 'Response exhibited action-first tool execution or concise question disambiguation.'}
+

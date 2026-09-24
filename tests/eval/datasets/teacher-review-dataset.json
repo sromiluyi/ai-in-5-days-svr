@@ -1,0 +1,215 @@
+{
+  "eval_cases": [
+    {
+      "eval_case_id": "teacher_direct_score_override_action_first",
+      "agent_data": {
+        "turns": [
+          {
+            "turn_index": 0,
+            "events": [
+              {
+                "author": "user",
+                "content": {
+                  "role": "user",
+                  "parts": [
+                    {
+                      "text": "Submit student assessment for review: Jordan Rivera (MS-8842), The Hunger Games Unit Assessment"
+                    }
+                  ]
+                }
+              },
+              {
+                "author": "teacher_dialogue_coordinator",
+                "content": {
+                  "role": "model",
+                  "parts": [
+                    {
+                      "text": "⚠️ **Human-in-the-Loop Educator Review Required**:\n- **Student Token**: `STUDENT_ANON_2A8BA3`\n- **Calculated Score**: **97.5%** (Grade: **A**)\n- **Trigger Reasons**: High honors verification\n\n**Review Actions Available**:\n• **Approve**: Type 'approve' to finalize.\n• **Targeted Regrade**: e.g. 'Regrade Q2 with +2 points'\n• **Score Override**: e.g. 'Override Q4 to 18'\n\nHow would you like to proceed?"
+                    }
+                  ]
+                }
+              },
+              {
+                "author": "user",
+                "content": {
+                  "role": "user",
+                  "parts": [
+                    {
+                      "text": "Override Q4 to 18: strong alternative thesis with insightful novel evidence."
+                    }
+                  ]
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "reference": {
+        "response": {
+          "role": "model",
+          "parts": [
+            {
+              "text": "Successfully applied teacher override to Q4. New score: 18.0/20.0 (+2.0 pts). The updated overall score and grade have been recorded in the audit trail."
+            }
+          ]
+        }
+      },
+      "rubric_groups": {
+        "action_first_behavior": {
+          "rubrics": [
+            {
+              "rubric_id": "immediate_tool_invocation",
+              "description": "The agent must invoke apply_teacher_score_override or override_section_score_with_audit for question Q4 with score 18.0 immediately."
+            },
+            {
+              "rubric_id": "no_parameter_gatekeeping",
+              "description": "The agent must not interrogate the teacher for technical parameters such as scorecard_id, dimension, or justification constraints."
+            },
+            {
+              "rubric_id": "transparent_score_confirmation",
+              "description": "The agent must confirm the updated score (18.0) and report the new score metrics."
+            }
+          ]
+        }
+      }
+    },
+    {
+      "eval_case_id": "teacher_targeted_regrade_action_first",
+      "agent_data": {
+        "turns": [
+          {
+            "turn_index": 0,
+            "events": [
+              {
+                "author": "user",
+                "content": {
+                  "role": "user",
+                  "parts": [
+                    {
+                      "text": "Submit student assessment for review: Jordan Rivera (MS-8842)"
+                    }
+                  ]
+                }
+              },
+              {
+                "author": "teacher_dialogue_coordinator",
+                "content": {
+                  "role": "model",
+                  "parts": [
+                    {
+                      "text": "⚠️ **Human-in-the-Loop Educator Review Required**:\n- **Student Token**: `STUDENT_ANON_2A8BA3`\n- **Calculated Score**: **97.5%** (Grade: **A**)"
+                    }
+                  ]
+                }
+              },
+              {
+                "author": "user",
+                "content": {
+                  "role": "user",
+                  "parts": [
+                    {
+                      "text": "Regrade Q2 correctness with +2 points: student clearly noted how tracker jackers were dropped on Careers."
+                    }
+                  ]
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "reference": {
+        "response": {
+          "role": "model",
+          "parts": [
+            {
+              "text": "Successfully re-evaluated Q2 via correctness agent. New score: 5.0/5.0 (+2.0 pts). Audit record logged."
+            }
+          ]
+        }
+      },
+      "rubric_groups": {
+        "action_first_behavior": {
+          "rubrics": [
+            {
+              "rubric_id": "immediate_regrade_dispatch",
+              "description": "The agent must invoke regrade_assessment_section for question Q2 with feedback regarding tracker jackers."
+            },
+            {
+              "rubric_id": "no_scorecard_id_interrogation",
+              "description": "The agent must resolve scorecard context from session state without asking the teacher for technical scorecard IDs."
+            }
+          ]
+        }
+      }
+    },
+    {
+      "eval_case_id": "teacher_unspecified_question_clarification",
+      "agent_data": {
+        "turns": [
+          {
+            "turn_index": 0,
+            "events": [
+              {
+                "author": "user",
+                "content": {
+                  "role": "user",
+                  "parts": [
+                    {
+                      "text": "Submit student assessment for review: Jordan Rivera (MS-8842)"
+                    }
+                  ]
+                }
+              },
+              {
+                "author": "teacher_dialogue_coordinator",
+                "content": {
+                  "role": "model",
+                  "parts": [
+                    {
+                      "text": "⚠️ **Human-in-the-Loop Educator Review Required**:\n- **Student Token**: `STUDENT_ANON_2A8BA3`\n- **Calculated Score**: **97.5%** (Grade: **A**)"
+                    }
+                  ]
+                }
+              },
+              {
+                "author": "user",
+                "content": {
+                  "role": "user",
+                  "parts": [
+                    {
+                      "text": "Re-evaluation of essay structure"
+                    }
+                  ]
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "reference": {
+        "response": {
+          "role": "model",
+          "parts": [
+            {
+              "text": "I can certainly help re-evaluate the essay structure. Would you like me to adjust Question 4 (Capitol psychological and political control) or Question 5 (Rue's flowers and nightlock berries subversion)?"
+            }
+          ]
+        }
+      },
+      "rubric_groups": {
+        "clarification_behavior": {
+          "rubrics": [
+            {
+              "rubric_id": "prompt_for_question_disambiguation",
+              "description": "When the teacher gives broad feedback without a question number, the agent must prompt the teacher once to specify which question number (Q4 or Q5) they would like to adjust."
+            },
+            {
+              "rubric_id": "avoid_repetitive_loop",
+              "description": "The agent must not loop indefinitely or ask for extraneous technical parameters; it must offer clear, direct options to disambiguate the target question."
+            }
+          ]
+        }
+      }
+    }
+  ]
+}

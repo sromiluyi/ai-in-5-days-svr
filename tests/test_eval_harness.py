@@ -84,3 +84,53 @@ def test_golden_evaluation_dataset_harness(golden_dataset):
     accuracy = (passed_cases / total_cases) * 100.0
     print(f"\n[Golden Evaluation Harness] Accuracy: {accuracy:.1f}% ({passed_cases}/{total_cases} passed)")
     assert accuracy == 100.0
+
+
+def test_teacher_review_eval_dataset_schema_and_cases():
+    """Verify that tests/eval/datasets/teacher-review-dataset.json conforms to EvalCase schema."""
+    dataset_file = Path(__file__).parent / "eval" / "datasets" / "teacher-review-dataset.json"
+    assert dataset_file.exists(), "teacher-review-dataset.json not found"
+
+    dataset = json.loads(dataset_file.read_text(encoding="utf-8"))
+    assert "eval_cases" in dataset
+    cases = dataset["eval_cases"]
+    assert len(cases) >= 3
+
+    expected_case_ids = {
+        "teacher_direct_score_override_action_first",
+        "teacher_targeted_regrade_action_first",
+        "teacher_unspecified_question_clarification",
+    }
+    actual_case_ids = {c["eval_case_id"] for c in cases}
+    assert expected_case_ids.issubset(actual_case_ids)
+
+    for case in cases:
+        # Validate multi-turn structure (Shape B continued conversation)
+        assert "eval_case_id" in case
+        assert "agent_data" in case
+        agent_data = case["agent_data"]
+        assert "turns" in agent_data
+        assert len(agent_data["turns"]) >= 1
+
+        last_turn = agent_data["turns"][-1]
+        events = last_turn["events"]
+        # Last event must be the user prompt / instruction triggering the next agent action
+        assert events[-1]["author"] == "user"
+        user_text = events[-1]["content"]["parts"][0]["text"]
+        assert len(user_text) > 0
+
+        # Validate reference ground truth
+        assert "reference" in case
+        assert "response" in case["reference"]
+
+        # Validate rubric groups
+        assert "rubric_groups" in case
+        rubric_groups = case["rubric_groups"]
+        assert len(rubric_groups) > 0
+        for group_name, group in rubric_groups.items():
+            assert "rubrics" in group
+            for rubric in group["rubrics"]:
+                assert "rubric_id" in rubric
+                assert "description" in rubric
+                assert len(rubric["description"]) > 10
+
