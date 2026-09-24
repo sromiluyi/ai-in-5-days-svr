@@ -124,8 +124,9 @@ async def test_interactive_multi_turn_dialogue_with_regrade(flagged_submission_s
     ctx.resume_inputs = {"teacher_approval": "Why did they lose points on Question 2?"}
     events_1 = [ev async for ev in teacher_review_node_func(ctx, node_input)]
 
-    assert len(events_1) == 1
-    req_1 = events_1[0]
+    assert len(events_1) == 2
+    chat_ev_1, req_1 = events_1[0], events_1[1]
+    assert "Evaluation Breakdown for Q2" in chat_ev_1.message.parts[0].text
     assert req_1.interrupt_id == "teacher_dialogue_2"
     assert "Evaluation Breakdown for Q2" in req_1.message
     # Check that NO custom chat history is stored in ctx.state (native ADK session handles history)
@@ -133,12 +134,14 @@ async def test_interactive_multi_turn_dialogue_with_regrade(flagged_submission_s
 
     # 3. Turn 2: Teacher requests targeted regrade for Q2
     ctx.resume_inputs = {
-        "teacher_dialogue_2": "Regrade Q2 correctness: student clearly described the tracker jacker drop, give +2 points"
+        "teacher_approval": "Why did they lose points on Question 2?",
+        "teacher_dialogue_2": "Regrade Q2 correctness: student clearly described the tracker jacker drop, give +2 points",
     }
     events_2 = [ev async for ev in teacher_review_node_func(ctx, node_input)]
 
-    assert len(events_2) == 1
-    req_2 = events_2[0]
+    assert len(events_2) == 2
+    chat_ev_2, req_2 = events_2[0], events_2[1]
+    assert "Targeted Regrade Applied" in chat_ev_2.message.parts[0].text
     assert req_2.interrupt_id == "teacher_dialogue_3"
     assert "Targeted Regrade Applied" in req_2.message
     assert "Question 2" in req_2.message
@@ -149,7 +152,11 @@ async def test_interactive_multi_turn_dialogue_with_regrade(flagged_submission_s
     assert any(a.action == "SECTION_REGRADE_DISPATCH" for a in updated_sc.audit_history)
 
     # 4. Turn 3: Teacher says "approve" to finalize
-    ctx.resume_inputs = {"teacher_dialogue_3": "approve"}
+    ctx.resume_inputs = {
+        "teacher_approval": "Why did they lose points on Question 2?",
+        "teacher_dialogue_2": "Regrade Q2 correctness: student clearly described the tracker jacker drop, give +2 points",
+        "teacher_dialogue_3": "approve",
+    }
     events_3 = [ev async for ev in teacher_review_node_func(ctx, node_input)]
 
     assert len(events_3) == 1

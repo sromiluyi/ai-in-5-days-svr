@@ -279,19 +279,20 @@ async def teacher_review_node_func(ctx: Context, node_input: dict):
         )
         return
 
-    # Extract user input from resume inputs
-    current_key = f"teacher_dialogue_{turn}"
-    raw_decision = None
-    for k in [current_key, f"teacher_dialogue_{turn - 1}", "teacher_approval", *ctx.resume_inputs.keys()]:
-        if k in ctx.resume_inputs:
-            raw_decision = ctx.resume_inputs[k]
-            break
+    # Extract user input from the latest resume input
+    # In ADK, resume_inputs rehydrates all resolved interrupts across turns.
+    # The current turn's response is the last entry in ctx.resume_inputs.
+    turn = len(ctx.resume_inputs)
+    latest_interrupt_id = list(ctx.resume_inputs.keys())[-1]
+    raw_decision = ctx.resume_inputs[latest_interrupt_id]
 
     if isinstance(raw_decision, dict):
         user_text = str(
             raw_decision.get("response")
+            or raw_decision.get("result")
             or raw_decision.get("decision")
             or raw_decision.get("teacher_approval")
+            or raw_decision.get(latest_interrupt_id)
             or raw_decision
         ).strip()
     else:
@@ -360,13 +361,11 @@ async def teacher_review_node_func(ctx: Context, node_input: dict):
 
     # 3. Interactive Dialogue Turn (Questions, Regrades, Overrides)
     # Native ADK execution via ctx.run_node(coordinator_agent, node_input=user_text)
-    # Session conversation history is tracked automatically in ctx.session.events.
-    ctx.state["review_turn_count"] = turn + 1
-
+    # Pass a unique run_id per turn to avoid ADK replaying prior turn cached outputs
     agent_output = None
     if hasattr(ctx, "run_node"):
         import inspect
-        res = ctx.run_node(coordinator_agent, node_input=user_text)
+        res = ctx.run_node(coordinator_agent, node_input=user_text, run_id=f"dialogue_turn_{turn}")
         if inspect.isawaitable(res):
             agent_output = await res
         else:
@@ -383,8 +382,8 @@ async def teacher_review_node_func(ctx: Context, node_input: dict):
         agent_reply = ctx.state.get("coordinator_response") or str(agent_output or "")
 
     # Sync scorecard from state / db if regrade or override occurred
-    updated_sc_dict = ctx.state.get("scorecard")
-    if not updated_sc_dict and scorecard_id:
+    updated_sc_dict = ctx.state.get("scorecard") or scorecard_data
+    if scorecard_id:
         db_sc = scorecard_db.get_scorecard(scorecard_id)
         if db_sc:
             updated_sc_dict = db_sc.model_dump()
@@ -400,6 +399,13 @@ async def teacher_review_node_func(ctx: Context, node_input: dict):
         f"• Type **'approve'** when you are ready to finalize and record this grade."
     )
 
+    # 1. Emit conversational Event so the educator sees the response in the chat view
+    yield Event(
+        message=agent_reply,
+        state={"scorecard": updated_sc_dict, "review_status": "IN_REVIEW", "review_turn_count": turn},
+    )
+
+    # 2. Yield RequestInput to prompt the UI for the subsequent educator turn
     yield RequestInput(
         interrupt_id=next_interrupt,
         message=follow_up_prompt,
