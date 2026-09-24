@@ -106,6 +106,8 @@ celerybeat.pid
 
 # Environments
 .env
+.env.*
+.env*.local
 !.env.example
 .venv
 .venv*
@@ -209,7 +211,9 @@ tools/a2a-inspector/
 
 # Credentials and private keys
 *.pem
-*-key.json
-credentials*.json
+*.key
+*key*.json
+*credentials*.json
+service_account*.json
 *.db
 *.sqlite*

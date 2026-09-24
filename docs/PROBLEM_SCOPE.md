@@ -18,11 +18,11 @@ An enterprise-grade, privacy-first, multi-agent AI assessment system built with 
 3. **Enforces Rigorous Human-in-the-Loop (HITL) Safeguards**:
    - Automatically pauses execution via ADK's native `RequestInput` and `@node(rerun_on_resume=True)` when any submission scores **< 60%** (failing/intervention required), **> 90%** (excellence/outlier verification), or shows a **> 30% discrepancy** between correctness and writing quality.
    - Requires explicit teacher confirmation or override before final grade record release and unmasking.
-4. **Enables Interactive Teacher Dialogue & Targeted Recourse**:
-   - Teachers can engage in multi-turn natural language dialogue with the Coordinator Agent.
-   - Teachers can command the agent to **re-dispatch specific specialist agents** with pedagogical guidance (e.g., "Regrade question 3 writing quality considering student's IEP accommodation").
-   - Teachers can apply **direct manual score overrides**, complete with structured audit logs that preserve original scores, revised scores, and teacher rationale.
-5. **Meets 95/95 Points of the AgentOps Code Review Matrix**: Full OpenTelemetry tracing, structured JSON logging with Intent vs. Outcome captures, PII scrubbing, context compaction, persistent sessions via Agent Runtime, automated golden test harness, Secret Manager, and Terraform IaC.
+4. **Enables Interactive Teacher Dialogue & Targeted Recourse (`ctx.run_node(coordinator_agent)`)**:
+   - Teachers can engage in multi-turn natural language dialogue with the Coordinator Agent (`teacher_dialogue_coordinator`) inside the resumable `teacher_review_node` (`@node(rerun_on_resume=True)`), with `{student_token}` and `{scorecard}` dynamically injected from session state and conversation history tracked in `ctx.session.events`.
+   - Teachers can command the agent to **re-dispatch specific specialist agents** with pedagogical guidance (`regrade_assessment_section`, e.g., "Regrade question 2 correctness considering student's IEP accommodation").
+   - Teachers can apply **direct manual score overrides** (`apply_teacher_score_override`), complete with structured audit logs (`AuditLogEntry`) that preserve original scores, revised scores, and teacher rationale.
+5. **Spec-Driven Development & 95/95 AgentOps Rubric Alignment**: Documented in [`docs/spec.md`](file:///usr/local/google/home/sromiluyi/projects/ai-in-5-days-svr/docs/spec.md) and [`docs/ARCHITECTURE.md`](file:///usr/local/google/home/sromiluyi/projects/ai-in-5-days-svr/docs/ARCHITECTURE.md), with full OpenTelemetry tracing, structured JSON logging with Intent vs. Outcome captures, PII scrubbing, context compaction, persistent sessions via `DatabaseSessionService` / Agent Runtime, automated golden test harness, Secret Manager, and Terraform IaC.
 
 ## 3. Users and Personas
 - **Primary User**: Middle School ELA Teacher / Educator.
