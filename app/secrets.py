@@ -86,20 +86,13 @@ def store_gemini_api_key(
     api_key: str,
     secret_id: str = "gemini-api-key",
     project_id: Optional[str] = None,
-    create_container_if_missing: bool = True,
 ) -> bool:
     """Store or update the Gemini API Key in Google Cloud Secret Manager.
-
-    Follows Terraform IaC best practices:
-    - Adds a new payload version to the secret container provisioned by Terraform.
-    - If the container does not exist yet and create_container_if_missing is True,
-      creates the container as an automated bootstrap.
 
     Args:
         api_key: The secret API key string to store.
         secret_id: Name/ID of the secret in Secret Manager.
         project_id: Google Cloud project ID.
-        create_container_if_missing: Whether to auto-create the container if Terraform hasn't run.
 
     Returns:
         True if successfully stored, False otherwise.
@@ -110,26 +103,9 @@ def store_gemini_api_key(
     try:
         client = secretmanager.SecretManagerServiceClient()
         parent = f"projects/{proj}"
-        secret_path = client.secret_path(proj, secret_id)
 
-        # 1. Check if the container exists (typically provisioned by Terraform)
-        container_exists = True
+        # 1. Create secret if it does not already exist
         try:
-            client.get_secret(request={"name": secret_path})
-        except Exception:
-            container_exists = False
-
-        # 2. If missing, optionally create the container (fallback for local development)
-        if not container_exists:
-            if not create_container_if_missing:
-                log_outcome(
-                    "SecretManager",
-                    "STORE_SECRET",
-                    "FAILED",
-                    f"Secret container '{secret_id}' does not exist. Run 'agents-cli infra single-project --apply' first.",
-                )
-                return False
-
             client.create_secret(
                 request={
                     "parent": parent,
@@ -137,8 +113,12 @@ def store_gemini_api_key(
                     "secret": {"replication": {"automatic": {}}},
                 }
             )
+        except Exception:
+            # Secret already exists
+            pass
 
-        # 3. Add new secret version with the API key payload
+        # 2. Add new secret version with the API key payload
+        secret_path = client.secret_path(proj, secret_id)
         client.add_secret_version(
             request={
                 "parent": secret_path,

@@ -19,11 +19,14 @@ terraform {
       source  = "hashicorp/google"
       version = "~> 7.28.0"
     }
-    random = {
-      source  = "hashicorp/random"
-      version = "~> 3.7.0"
-    }
   }
+}
+
+provider "google" {
+  project               = var.project_id
+  region                = var.region
+  billing_project       = var.project_id
+  user_project_override = true
 }
 
 provider "google" {

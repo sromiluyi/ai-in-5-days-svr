@@ -21,15 +21,10 @@ locals {
   ]
 
   services = [
-    "aiplatform.googleapis.com",
-    "cloudbuild.googleapis.com",
-    "run.googleapis.com",
-    "bigquery.googleapis.com",
-    "iam.googleapis.com",
-    "logging.googleapis.com",
-    "cloudtrace.googleapis.com",
-    "telemetry.googleapis.com",
     "secretmanager.googleapis.com",
+    "aiplatform.googleapis.com",
+    "logging.googleapis.com",
+    "iam.googleapis.com",
   ]
 }
 
@@ -44,7 +39,7 @@ resource "google_project_service" "bootstrap" {
   disable_on_destroy = false
 }
 
-# for_each, not count, so adding or removing an API does not renumber the rest.
+# Application services required for Secret Manager and Gemini execution
 resource "google_project_service" "services" {
   for_each = toset(local.services)
 
@@ -53,10 +48,4 @@ resource "google_project_service" "services" {
   disable_on_destroy = false
 
   depends_on = [google_project_service.bootstrap]
-}
-
-resource "google_project_service_identity" "vertex_sa" {
-  provider = google-beta
-  project = var.project_id
-  service = "aiplatform.googleapis.com"
 }

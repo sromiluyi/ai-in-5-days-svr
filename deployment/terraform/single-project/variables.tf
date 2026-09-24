@@ -39,11 +39,8 @@ variable "app_sa_roles" {
   description = "List of roles to assign to the application service account"
   type        = list(string)
   default = [
-
     "roles/aiplatform.user",
     "roles/logging.logWriter",
-    "roles/cloudtrace.agent",
-    "roles/storage.admin",
     "roles/serviceusage.serviceUsageConsumer",
   ]
 }

@@ -12,11 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-provider "google" {
-  project               = var.project_id
-  region                = var.region
-  user_project_override = true
-}
+
 
 resource "google_storage_bucket" "logs_data_bucket" {
   name                        = "${var.project_id}-${var.project_name}-logs"
