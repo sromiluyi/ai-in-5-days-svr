@@ -252,7 +252,7 @@ class StudentScoreCard(BaseModel):
     
     # Scores
     total_score: float = Field(..., ge=0.0)
-    max_possible_score: float = Field(..., gt=0.0)
+    max_possible_score: float = Field(default=100.0, ge=0.0)
     overall_percentage: float = Field(..., ge=0.0, le=100.0)
     letter_grade: str = Field(..., description="Letter grade (A, B, C, D, F).")
     

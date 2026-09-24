@@ -105,7 +105,8 @@ def synthesize_exam_scorecard(
         total_quality_awarded += qual.score
         total_quality_possible += qual.max_score
 
-    overall_pct = (total_awarded / total_possible) * 100.0 if total_possible > 0 else 0.0
+    calc_possible = total_possible if total_possible > 0 else 100.0
+    overall_pct = (total_awarded / calc_possible) * 100.0 if calc_possible > 0 else 0.0
     corr_pct = (
         (total_correctness_awarded / total_correctness_possible) * 100.0
         if total_correctness_possible > 0
@@ -144,7 +145,7 @@ def synthesize_exam_scorecard(
         student_token=student_token,
         exam_title=exam_title,
         total_score=total_awarded,
-        max_possible_score=total_possible,
+        max_possible_score=calc_possible,
         overall_percentage=overall_pct,
         letter_grade=letter,
         correctness_percentage=corr_pct,

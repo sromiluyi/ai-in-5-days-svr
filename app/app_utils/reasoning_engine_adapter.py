@@ -25,7 +25,10 @@ packaged Agent Engine.
 import inspect
 import json
 
-from agentplatform.agent_engines.templates.adk import AdkApp
+try:
+    from vertexai.agent_engines.templates.adk import AdkApp
+except ImportError:
+    from agentplatform.agent_engines.templates.adk import AdkApp
 from fastapi import FastAPI, HTTPException, Request, encoders, responses
 from starlette.concurrency import iterate_in_threadpool, run_in_threadpool
 

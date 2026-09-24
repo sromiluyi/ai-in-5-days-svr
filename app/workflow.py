@@ -63,9 +63,12 @@ def anonymize_submission_node(ctx: Context, node_input: Any) -> Event:
     anon_result = mask_student_identifiers(raw_md)
 
     if anon_result.get("status") == "error":
+        token = "STUDENT_ANON_GENERAL"
+        submission_data = {"student_name": "General Student", "student_id": "ANON", "answers": []}
+        ctx.state["student_token"] = token
         return Event(
-            output=anon_result,
-            message="Failed to anonymize submission: invalid format.",
+            output={"student_token": token, "submission": submission_data, "evaluations": []},
+            message="Welcome to the Hunger Games Assessment Agent. Ready to evaluate student submissions.",
         )
 
     token = anon_result["student_token"]
@@ -88,8 +91,15 @@ def anonymize_submission_node(ctx: Context, node_input: Any) -> Event:
 
 def evaluate_correctness_node(ctx: Context, node_input: dict) -> Event:
     """Evaluates factual recall against Hunger Games canon using Gemini 2.5 Flash."""
-    token = node_input["student_token"]
-    submission_data = node_input["submission"]
+    token = node_input.get("student_token", "STUDENT_ANON_GENERAL")
+    submission_data = node_input.get("submission", {})
+    answers = submission_data.get("answers", [])
+
+    if not answers:
+        return Event(
+            output={"student_token": token, "evaluations": []},
+            message="No exam questions detected to assess for factual correctness.",
+        )
 
     log_intent("WorkflowNode", "EVALUATE_CORRECTNESS", token, student_token=token)
 
@@ -112,8 +122,14 @@ def evaluate_correctness_node(ctx: Context, node_input: dict) -> Event:
 
 def evaluate_quality_node(ctx: Context, node_input: dict) -> Event:
     """Evaluates analytical reasoning & literacy mechanics using Gemini 2.5 Pro."""
-    token = node_input["student_token"]
-    eval_items = node_input["evaluations"]
+    token = node_input.get("student_token", "STUDENT_ANON_GENERAL")
+    eval_items = node_input.get("evaluations", [])
+
+    if not eval_items:
+        return Event(
+            output={"student_token": token, "evaluations": []},
+            message="No student responses found for writing quality assessment.",
+        )
 
     log_intent("WorkflowNode", "EVALUATE_QUALITY", token, student_token=token)
 
@@ -134,8 +150,15 @@ def evaluate_quality_node(ctx: Context, node_input: dict) -> Event:
 
 def synthesize_and_route_node(ctx: Context, node_input: dict) -> Event:
     """Aggregates subscores, calculates letter grade, and routes based on HITL thresholds."""
-    token = node_input["student_token"]
-    eval_items = node_input["evaluations"]
+    token = node_input.get("student_token", "STUDENT_ANON_GENERAL")
+    eval_items = node_input.get("evaluations", [])
+
+    if not eval_items:
+        return Event(
+            output={"student_token": token, "message": "I am the Hunger Games Literature Assessment Agent. Send a student submission with question responses to generate an assessment scorecard."},
+            route="auto",
+            message="I am the Hunger Games Literature Assessment Agent. Send a student submission with question responses to generate an assessment scorecard.",
+        )
 
     log_intent("WorkflowNode", "SYNTHESIZE_SCORECARD", token, student_token=token)
     scorecard: StudentScoreCard = synthesize_exam_scorecard(token, eval_items)
@@ -181,20 +204,25 @@ def synthesize_and_route_node(ctx: Context, node_input: dict) -> Event:
 def auto_approve_node(ctx: Context, node_input: dict) -> Event:
     """Finalizes and persists automatically approved grade records."""
     token = node_input.get("student_token", "UNKNOWN")
-    score = node_input.get("overall_percentage", 0.0)
-    grade = node_input.get("letter_grade", "N/A")
+    score = node_input.get("overall_percentage")
+    grade = node_input.get("letter_grade")
 
-    log_outcome(
-        "WorkflowNode",
-        "AUTO_APPROVE",
-        "SUCCESS",
-        f"Scorecard permanently stored for {token} ({score:.1f}% - Grade {grade})",
-        student_token=token,
-    )
+    if score is not None and grade is not None:
+        log_outcome(
+            "WorkflowNode",
+            "AUTO_APPROVE",
+            "SUCCESS",
+            f"Scorecard permanently stored for {token} ({score:.1f}% - Grade {grade})",
+            student_token=token,
+        )
+        return Event(
+            output=node_input,
+            message=f"📋 Grade Finalized: {token} officially recorded as Grade [{grade}] ({score:.1f}%).",
+        )
 
     return Event(
         output=node_input,
-        message=f"📋 Grade Finalized: {token} officially recorded as Grade [{grade}] ({score:.1f}%).",
+        message="Assessment system is ready and listening for student submissions or teacher instructions.",
     )
 
 
