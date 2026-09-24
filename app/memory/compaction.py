@@ -2,12 +2,11 @@
 
 Implements token-based thresholding and sliding window event retention via ADK's
 EventsCompactionConfig to prevent context bloat during extended multi-turn
-teacher dialogue.
+teacher dialogue without custom chat history management.
 """
 
 from __future__ import annotations
 
-from typing import Any, List
 from google.adk.apps.app import EventsCompactionConfig
 
 from app.config import config
@@ -25,18 +24,3 @@ def get_events_compaction_config() -> EventsCompactionConfig:
         compaction_interval=3,
         overlap_size=1,
     )
-
-
-def compact_conversation_history(events: List[Any], max_events: int = 10) -> List[Any]:
-    """Utility function to apply a sliding window retention on event sequences.
-
-    Args:
-        events: List of raw conversation events or messages.
-        max_events: Maximum number of recent events to retain.
-
-    Returns:
-        Sliding window slice of the most recent events.
-    """
-    if len(events) <= max_events:
-        return events
-    return events[-max_events:]

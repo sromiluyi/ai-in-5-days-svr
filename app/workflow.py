@@ -39,7 +39,7 @@ from google.adk.events.event import Event
 from google.adk.events.request_input import RequestInput
 from google.adk.workflow import START, Workflow, node
 
-from app.agents.coordinator_agent import handle_coordinator_dialogue_turn
+from app.agents.coordinator_agent import coordinator_agent
 from app.agents.scorecard_agent import synthesize_exam_scorecard
 from app.cli import evaluate_submission_offline
 from app.config import config
@@ -240,18 +240,18 @@ async def teacher_review_node_func(ctx: Context, node_input: dict):
     - Managing session conversation history across multiple turns
     - Preserving bias-free pseudonym masking until final teacher sign-off
     """
-    token = node_input.get("student_token", "UNKNOWN")
-    scorecard_id = node_input.get("scorecard_id")
+    token = ctx.state.get("student_token") or node_input.get("student_token", "UNKNOWN")
+    scorecard_data = ctx.state.get("scorecard") or node_input
+    scorecard_id = scorecard_data.get("scorecard_id")
     turn = ctx.state.get("review_turn_count", 0)
-    chat_history: List[Dict[str, str]] = ctx.state.get("teacher_chat_history", [])
 
     # First turn: initial pause before any educator input
     if not ctx.resume_inputs:
         ctx.state["review_turn_count"] = 1
-        ctx.state["teacher_chat_history"] = []
-        score = float(node_input.get("overall_percentage", 0.0))
-        grade = node_input.get("letter_grade", "N/A")
-        flag_reasons = node_input.get("hitL_review", {}).get("flag_reasons", [])
+        ctx.state["review_status"] = "IN_REVIEW"
+        score = float(scorecard_data.get("overall_percentage", 0.0))
+        grade = scorecard_data.get("letter_grade", "N/A")
+        flag_reasons = scorecard_data.get("hitL_review", {}).get("flag_reasons", [])
 
         prompt_message = (
             f"⚠️ **Human-in-the-Loop Educator Review Required**:\n\n"
@@ -299,7 +299,7 @@ async def teacher_review_node_func(ctx: Context, node_input: dict):
 
     # 1. Quick Approval / Finalize
     if user_text.lower() in ("yes", "y", "approve", "approved", "confirm", "confirmed", "finalize", "finalized", "looks good", "done"):
-        latest_sc = (scorecard_db.get_scorecard(scorecard_id) if scorecard_id else None) or StudentScoreCard.model_validate(node_input)
+        latest_sc = (scorecard_db.get_scorecard(scorecard_id) if scorecard_id else None) or StudentScoreCard.model_validate(scorecard_data)
         latest_sc.hitL_review.teacher_decision = "TEACHER_CONFIRMED"
         latest_sc.hitL_review.teacher_notes = f"Teacher finalized and approved assessment (Final Score: {latest_sc.overall_percentage:.1f}%, Grade: {latest_sc.letter_grade})."
         scorecard_db.save_scorecard(latest_sc)
@@ -326,6 +326,7 @@ async def teacher_review_node_func(ctx: Context, node_input: dict):
 
         yield Event(
             output=final_dict,
+            state={"scorecard": final_dict, "review_status": "TEACHER_CONFIRMED"},
             message=(
                 f"✅ **Assessment Review Finalized**\n\n"
                 f"- **Student**: **{student_name}** (`{student_id_val}`)\n"
@@ -339,7 +340,7 @@ async def teacher_review_node_func(ctx: Context, node_input: dict):
 
     # 2. Explicit Rejection
     if user_text.lower() in ("no", "reject", "rejected"):
-        latest_sc = (scorecard_db.get_scorecard(scorecard_id) if scorecard_id else None) or StudentScoreCard.model_validate(node_input)
+        latest_sc = (scorecard_db.get_scorecard(scorecard_id) if scorecard_id else None) or StudentScoreCard.model_validate(scorecard_data)
         latest_sc.hitL_review.teacher_decision = "TEACHER_REJECTED"
         latest_sc.hitL_review.teacher_notes = "Teacher rejected assessment."
         scorecard_db.save_scorecard(latest_sc)
@@ -347,30 +348,47 @@ async def teacher_review_node_func(ctx: Context, node_input: dict):
         unmask_result = restore_student_identity_vault(token, teacher_auth=True)
         student_name = unmask_result.get("student_name", "Student") if unmask_result.get("status") == "success" else "Student"
 
+        final_dict = latest_sc.model_dump()
+        final_dict["student_name"] = student_name
+
         yield Event(
-            output=latest_sc.model_dump(),
+            output=final_dict,
+            state={"scorecard": final_dict, "review_status": "TEACHER_REJECTED"},
             message=f"❌ Assessment Review: {token} ({student_name}) marked as TEACHER_REJECTED.",
         )
         return
 
     # 3. Interactive Dialogue Turn (Questions, Regrades, Overrides)
-    chat_history.append({"role": "teacher", "content": user_text})
-
-    dialogue_res = await handle_coordinator_dialogue_turn(
-        scorecard_id=scorecard_id,
-        student_token=token,
-        teacher_input=user_text,
-        chat_history=chat_history,
-        fallback_scorecard=node_input,
-    )
-
-    agent_reply = dialogue_res["reply"]
-    latest_scorecard_data = dialogue_res.get("scorecard_data") or {}
-
-    node_input.update(latest_scorecard_data)
-    chat_history.append({"role": "coordinator", "content": agent_reply})
-    ctx.state["teacher_chat_history"] = chat_history
+    # Native ADK execution via ctx.run_node(coordinator_agent, node_input=user_text)
+    # Session conversation history is tracked automatically in ctx.session.events.
     ctx.state["review_turn_count"] = turn + 1
+
+    agent_output = None
+    if hasattr(ctx, "run_node"):
+        import inspect
+        res = ctx.run_node(coordinator_agent, node_input=user_text)
+        if inspect.isawaitable(res):
+            agent_output = await res
+        else:
+            agent_output = res
+
+    # Extract text from agent output
+    if hasattr(agent_output, "text") and agent_output.text:
+        agent_reply = agent_output.text
+    elif isinstance(agent_output, str) and agent_output:
+        agent_reply = agent_output
+    elif hasattr(agent_output, "parts") and agent_output.parts:
+        agent_reply = "".join(p.text or "" for p in agent_output.parts if hasattr(p, "text"))
+    else:
+        agent_reply = ctx.state.get("coordinator_response") or str(agent_output or "")
+
+    # Sync scorecard from state / db if regrade or override occurred
+    updated_sc_dict = ctx.state.get("scorecard")
+    if not updated_sc_dict and scorecard_id:
+        db_sc = scorecard_db.get_scorecard(scorecard_id)
+        if db_sc:
+            updated_sc_dict = db_sc.model_dump()
+            ctx.state["scorecard"] = updated_sc_dict
 
     next_interrupt = f"teacher_dialogue_{turn + 1}"
     follow_up_prompt = (

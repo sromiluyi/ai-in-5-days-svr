@@ -5,22 +5,24 @@ Validates:
 2. Quick approval on turn 1 ("yes" / "approve") finalizing and unmasking.
 3. Interactive multi-turn conversation:
    - Asking questions about specific student answers and rubrics.
-   - In-conversation targeted regrades updating scorecard and audit log.
-   - Unmasking student identity from vault.
-   - Multi-turn session history persistence in ctx.state.
+   - Dynamic coordinator execution via ctx.run_node(coordinator_agent, ...)
+   - In-conversation targeted regrades updating scorecard and audit log in state and database.
+   - Confirming zero custom chat history lists in ctx.state (delegating to ADK Session).
    - Final approval after multi-turn adjustments.
 """
 
 from __future__ import annotations
 
 import pytest
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
+from app.agents.coordinator_agent import coordinator_agent
 from app.agents.scorecard_agent import synthesize_exam_scorecard
 from app.cli import evaluate_submission_offline
 from app.memory.session_service import scorecard_db
 from app.models import StudentScoreCard
 from app.tools.anonymizer_tool import mask_student_identifiers
+from app.tools.regrade_tools import regrade_assessment_section
 from app.workflow import teacher_review_node_func
 
 
@@ -65,7 +67,7 @@ async def test_initial_pause_and_quick_approval(flagged_submission_setup):
     # Turn 0: initial call without resume_inputs
     ctx = MagicMock()
     ctx.resume_inputs = {}
-    ctx.state = {}
+    ctx.state = {"scorecard": sc.model_dump(), "student_token": token}
 
     node_input = sc.model_dump()
     events = [ev async for ev in teacher_review_node_func(ctx, node_input)]
@@ -95,12 +97,28 @@ async def test_interactive_multi_turn_dialogue_with_regrade(flagged_submission_s
 
     ctx = MagicMock()
     ctx.resume_inputs = {}
-    ctx.state = {}
+    ctx.state = {"scorecard": sc.model_dump(), "student_token": token}
     node_input = sc.model_dump()
 
     # 1. First pause
     events_0 = [ev async for ev in teacher_review_node_func(ctx, node_input)]
     assert events_0[0].interrupt_id == "teacher_approval"
+
+    # Define mock coordinator response for turn 1 (question) and turn 2 (regrade)
+    async def mock_run_node(agent, node_input=None, **kwargs):
+        if "regrade" in str(node_input).lower():
+            # Tool call executed during coordinator agent turn
+            regrade_assessment_section(
+                scorecard_id=sc.scorecard_id,
+                question_id="Q2",
+                agent_target="correctness",
+                teacher_feedback="Student clearly described tracker jacker drop",
+                tool_context=MagicMock(state=ctx.state),
+            )
+            return "Targeted Regrade Applied for Question 2: score updated."
+        return "Evaluation Breakdown for Q2: Katniss dropped tracker jacker nest on the Career pack."
+
+    ctx.run_node = AsyncMock(side_effect=mock_run_node)
 
     # 2. Turn 1: Teacher asks a question about Question 2
     ctx.resume_inputs = {"teacher_approval": "Why did they lose points on Question 2?"}
@@ -110,11 +128,8 @@ async def test_interactive_multi_turn_dialogue_with_regrade(flagged_submission_s
     req_1 = events_1[0]
     assert req_1.interrupt_id == "teacher_dialogue_2"
     assert "Evaluation Breakdown for Q2" in req_1.message
-    # Check that session history was tracked
-    history = ctx.state.get("teacher_chat_history", [])
-    assert len(history) == 2
-    assert history[0]["role"] == "teacher"
-    assert history[1]["role"] == "coordinator"
+    # Check that NO custom chat history is stored in ctx.state (native ADK session handles history)
+    assert "teacher_chat_history" not in ctx.state
 
     # 3. Turn 2: Teacher requests targeted regrade for Q2
     ctx.resume_inputs = {
