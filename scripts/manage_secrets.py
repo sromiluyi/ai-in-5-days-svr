@@ -19,11 +19,12 @@ from app.config import config
 from app.secrets import get_secret, store_gemini_api_key
 
 
-def set_secret_command(project_id: str, secret_id: str) -> None:
+def set_secret_command(project_id: str, secret_id: str, create_container: bool = False) -> None:
     print("\n" + "=" * 65)
     print("🔐 STORE GEMINI API KEY IN GOOGLE CLOUD SECRET MANAGER")
-    print(f"   Project: {project_id}")
-    print(f"   Secret:  {secret_id}")
+    print(f"   Project:          {project_id}")
+    print(f"   Secret Container: {secret_id}")
+    print(f"   IaC Mode:         {'Auto-create container' if create_container else 'Add version to Terraform container'}")
     print("=" * 65)
 
     api_key = getpass.getpass("🔑 Enter your Gemini API Key (input will be hidden): ").strip()
@@ -31,15 +32,24 @@ def set_secret_command(project_id: str, secret_id: str) -> None:
         print("❌ Error: API key cannot be empty.")
         sys.exit(1)
 
-    print("\n⏳ Uploading to Google Cloud Secret Manager...")
-    success = store_gemini_api_key(api_key=api_key, secret_id=secret_id, project_id=project_id)
+    print("\n⏳ Uploading secret payload version to Google Cloud Secret Manager...")
+    success = store_gemini_api_key(
+        api_key=api_key,
+        secret_id=secret_id,
+        project_id=project_id,
+        create_container_if_missing=create_container,
+    )
 
     if success:
         print(f"✅ Successfully stored '{secret_id}' in Google Cloud Secret Manager!")
         print("   The agent and workflow will now automatically retrieve this key at runtime.")
     else:
-        print(f"❌ Failed to store secret in Secret Manager.")
-        print("   Please ensure Google Cloud authentication is active:")
+        print(f"❌ Failed to store secret version in Secret Manager.")
+        if not create_container:
+            print("\n💡 Did you provision the secret container with Terraform first?")
+            print(f"   Run: agents-cli infra single-project --project {project_id} --apply")
+            print("   (Or re-run with '--create-container' to bootstrap it out-of-band)")
+        print("\n   Also ensure Google Cloud authentication is active:")
         print("     gcloud auth application-default login")
         print(f"   and that Secret Manager API is enabled on project '{project_id}':")
         print(f"     gcloud services enable secretmanager.googleapis.com --project {project_id}")
@@ -82,11 +92,16 @@ def main():
         default="gemini-api-key",
         help="Secret ID (default: gemini-api-key)",
     )
+    parser.add_argument(
+        "--create-container",
+        action="store_true",
+        help="Create secret container if Terraform has not provisioned it yet",
+    )
 
     args = parser.parse_args()
 
     if args.action == "set":
-        set_secret_command(args.project, args.secret_id)
+        set_secret_command(args.project, args.secret_id, create_container=args.create_container)
     elif args.action == "get":
         get_secret_command(args.project, args.secret_id)
 
