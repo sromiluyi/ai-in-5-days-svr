@@ -16,23 +16,16 @@ Teacher Dialogue Coordinator:
 from __future__ import annotations
 
 import os
-from google.adk.agents import Agent, SequentialAgent
 from google.adk.apps import App, ResumabilityConfig
-from google.adk.models import Gemini
-from google.genai import types
 
 from app.agents.coordinator_agent import create_coordinator_agent
 from app.agents.correctness_agent import create_correctness_agent
 from app.agents.quality_agent import create_quality_agent
 from app.config import config
-from app.constitution import COORDINATOR_INSTRUCTIONS, PEDAGOGICAL_CONSTITUTION
 from app.mcp_server.canon_server import get_canon_mcp_toolset
-from app.memory.async_memory import generate_memories_callback
 from app.memory.compaction import get_events_compaction_config
 from app.secrets import get_secret
-from app.tools.anonymizer_tool import mask_student_identifiers, restore_student_identity_vault
-from app.tools.hitl_tools import finalize_student_grade_record
-from app.tools.regrade_tools import apply_teacher_score_override, regrade_assessment_section
+from app.workflow import assessment_workflow
 
 # Retrieve API key or credentials from Google Cloud Secret Manager if needed
 gemini_api_key = get_secret("gemini-api-key")
@@ -47,44 +40,15 @@ canon_mcp_toolset = get_canon_mcp_toolset()
 correctness_agent = create_correctness_agent()
 # Gemini 2.5 Pro for deep middle-school writing standards & qualitative analysis
 quality_agent = create_quality_agent()
+# Gemini 2.5 Pro for interactive teacher coordination & dialogue
+coordinator_agent = create_coordinator_agent()
 
-# 2. Sequential Specialist Evaluation Pipeline
-assessment_pipeline = SequentialAgent(
-    name="sequential_assessment_pipeline",
-    description="Executes sequential evaluation: factual correctness first, followed by writing quality analysis.",
-    sub_agents=[correctness_agent, quality_agent],
-)
+# 2. Root Agent: ADK 2.0 Graph Workflow (matches agents-cli-manifest.yaml 'ai_in_5_days_svr')
+from app.workflow import assessment_workflow
 
-# 3. Root Coordinator Agent (name MUST match agents-cli-manifest.yaml 'ai_in_5_days_svr')
-ROOT_INSTRUCTION = f"""
-{PEDAGOGICAL_CONSTITUTION}
+root_agent = assessment_workflow
 
----
-
-{COORDINATOR_INSTRUCTIONS}
-"""
-
-root_agent = Agent(
-    name="ai_in_5_days_svr",
-    description="Middle school ELA exam assessment assistant for The Hunger Games, coordinating sequential grading and teacher reviews.",
-    model=Gemini(
-        model=config.pro_model,
-        retry_options=types.HttpRetryOptions(attempts=3),
-    ),
-    instruction=ROOT_INSTRUCTION,
-    sub_agents=[assessment_pipeline],
-    tools=[
-        mask_student_identifiers,
-        restore_student_identity_vault,
-        regrade_assessment_section,
-        apply_teacher_score_override,
-        finalize_student_grade_record,
-        canon_mcp_toolset,
-    ],
-    after_agent_callback=generate_memories_callback,
-)
-
-# 4. Resumable & Compacting ADK App
+# 3. Resumable & Compacting ADK App
 app = App(
     root_agent=root_agent,
     name="ai_in_5_days_svr",

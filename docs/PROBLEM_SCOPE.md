@@ -10,18 +10,19 @@ Middle school English Language Arts (ELA) teachers face significant challenges w
 ## 2. Proposed Solution
 An enterprise-grade, privacy-first, multi-agent AI assessment system built with the Google Agent Development Kit (ADK) that:
 1. **Enforces Privacy & Unbiased Evaluation via Tokenized Anonymization**: Automatically strips student Names and Student IDs from submission markdowns before any agent sees them, sequestering real identities in an isolated cryptographic vault (`STUDENT_ANON_XXXX`) until final teacher review.
-2. **Employs a Sequential Multi-Agent Specialist Pipeline**:
-   - **Factual Correctness Assessor (Gemini 2.5 Flash)**: Verifies accuracy of short and long responses against the canonical lore of *The Hunger Games* and the teacher's official answer key.
-   - **Writing Quality Assessor (Gemini 2.5 Pro)**: Analyzes student writing against middle school (7th–8th grade) literacy standards, evaluating evidence integration, vocabulary, analytical depth, and structural coherence.
-   - **Scorecard Synthesizer**: Blends section scores using configurable rubric weights, generates constructive student-facing feedback, and assigns a balanced letter grade.
+2. **Employs an ADK 2.0 Graph Workflow with Specialized Agents & MCP**:
+   - **Canonical Lore MCP Server (`HungerGamesCanonMcpServer`)**: Ground-truth lore, rubrics, and exemplar benchmarks are queried via the Model Context Protocol over stdio JSON-RPC using `McpToolset`.
+   - **Factual Correctness Assessor Node (Gemini 2.5 Flash)**: Verifies accuracy of short and long responses against canonical lore and the official answer key.
+   - **Writing Quality Assessor Node (Gemini 2.5 Pro)**: Analyzes student writing against middle school (7th–8th grade) literacy standards, evaluating evidence integration, vocabulary, analytical depth, and structural coherence.
+   - **Scorecard Synthesizer Node**: Blends section scores using configurable rubric weights, generates constructive student-facing feedback, and assigns a balanced letter grade.
 3. **Enforces Rigorous Human-in-the-Loop (HITL) Safeguards**:
-   - Automatically pauses and flags any submission scoring **< 60%** (failing/intervention required), **> 90%** (excellence/outlier verification), or showing a **> 30% discrepancy** between correctness and writing quality.
-   - Requires explicit teacher confirmation before final score record release.
+   - Automatically pauses execution via ADK's native `RequestInput` and `@node(rerun_on_resume=True)` when any submission scores **< 60%** (failing/intervention required), **> 90%** (excellence/outlier verification), or shows a **> 30% discrepancy** between correctness and writing quality.
+   - Requires explicit teacher confirmation or override before final grade record release and unmasking.
 4. **Enables Interactive Teacher Dialogue & Targeted Recourse**:
    - Teachers can engage in multi-turn natural language dialogue with the Coordinator Agent.
    - Teachers can command the agent to **re-dispatch specific specialist agents** with pedagogical guidance (e.g., "Regrade question 3 writing quality considering student's IEP accommodation").
    - Teachers can apply **direct manual score overrides**, complete with structured audit logs that preserve original scores, revised scores, and teacher rationale.
-5. **Meets 95/95 Points of the AgentOps Code Review Matrix**: Full OpenTelemetry tracing, structured JSON logging with Intent vs. Outcome captures, PII scrubbing, context compaction, persistent sessions via Agent Runtime, automated golden test harness, and Terraform IaC.
+5. **Meets 95/95 Points of the AgentOps Code Review Matrix**: Full OpenTelemetry tracing, structured JSON logging with Intent vs. Outcome captures, PII scrubbing, context compaction, persistent sessions via Agent Runtime, automated golden test harness, Secret Manager, and Terraform IaC.
 
 ## 3. Users and Personas
 - **Primary User**: Middle School ELA Teacher / Educator.

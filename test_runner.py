@@ -17,7 +17,7 @@ from google.adk.runners import Runner
 from google.adk.sessions import InMemorySessionService
 from google.genai import types
 
-from app.workflow import assessment_workflow
+from app.agent import root_agent
 
 
 async def run_assessment_scenario(
@@ -114,7 +114,7 @@ async def main():
     print("=" * 65)
 
     session_service = InMemorySessionService()
-    runner = Runner(agent=assessment_workflow, session_service=session_service, app_name="app")
+    runner = Runner(agent=root_agent, session_service=session_service, app_name="app")
 
     # Scenario 1: Passing Student (High Honors Verification) -> Teacher Confirms
     await run_assessment_scenario(

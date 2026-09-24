@@ -2,15 +2,17 @@
 
 ## 1. System Architecture Overview
 
-The **Middle School Hunger Games Assessment Agent** is engineered as a privacy-preserving, multi-agent evaluation pipeline using the Google Agent Development Kit (ADK) and Google Cloud Vertex AI Agent Runtime.
+The **Middle School Hunger Games Assessment Agent** is engineered as an enterprise-grade, privacy-preserving **ADK 2.0 Graph Workflow** (`google.adk.workflow.Workflow`) where the primary evaluation steps are executed by specialized **`LlmAgent` nodes**, backed by the Model Context Protocol (MCP) for ground-truth canon retrieval and native Human-in-the-Loop hooks.
 
 ### High-Level Architecture Flowchart
 
 ```mermaid
 flowchart TD
+    START([START: Student Exam Submission Markdown]) --> N1
+
     subgraph Client["Teacher / User Interface Layer"]
-        CLI["Teacher Interactive REPL\n(python -m app.cli)"]
-        API["ADK FastAPI Endpoint\n(/run, /chat, /scorecard)"]
+        CLI["Teacher Interactive REPL / Test Harness\n(test_runner.py / app.cli)"]
+        API["ADK FastAPI Endpoint\n(/run, /apps/app/run)"]
     end
 
     subgraph Security["Privacy & Security Perimeter"]
@@ -18,22 +20,22 @@ flowchart TD
         SCRUB["Active PII Redaction Scrubber\n(Regex / DLP scrubbing before logging)"]
     end
 
-    subgraph Orchestration["ADK Multi-Agent Evaluation Engine"]
-        ANON["1. Anonymizer Tool\nExtracts PII into Vault & Emits Token"]
+    subgraph Workflow["ADK 2.0 Graph Workflow: root_agent = Workflow(...)"]
+        N1["1. Anonymizer Node (FunctionNode)\n• Extracts PII into Vault\n• Replaces metadata with STUDENT_ANON_XXXX\n• Emits AnonymizedSubmission"]
         
-        subgraph Pipeline["Sequential Specialist Pipeline (ADK SequentialAgent)"]
-            CORR["2. Factual Correctness Assessor\n(Gemini 2.5 Flash - Fast Model)\n• Verified against Canon lore"]
-            QUAL["3. Writing Quality Assessor\n(Gemini 2.5 Pro - Reasoning Model)\n• Middle-School ELA Standards"]
-            SCORE["4. Scorecard Synthesizer\n• Dimension Aggregation & Letter Grade"]
-        end
-
-        HITL{"5. Human-in-the-Loop Gate\n(tool_context.request_confirmation)\n• Score < 60%?\n• Score > 90%?\n• Discrepancy > 30%?"}
+        N2["2. Correctness Assessor Node (LlmAgent)\n• Model: Gemini 2.5 Flash (Fast Factual Model)\n• Tool: HungerGamesCanonMcpServer via McpToolset\n• Verifies factual recall against Book 1 canon"]
         
-        COORD["6. Teacher Dialogue Coordinator\n(Gemini 2.5 Pro)\n• Conversational Explanations\n• Targeted Section Regrading\n• Teacher Score Overrides with Audit Log"]
+        N3["3. Writing Quality Assessor Node (LlmAgent)\n• Model: Gemini 2.5 Pro (Deep Reasoning Model)\n• Evaluates: 7th–8th grade claim clarity, evidence, & mechanics"]
+        
+        N4["4. Scorecard Synthesizer Node (FunctionNode)\n• Aggregates section subscores & assigns letter grade\n• Evaluates HITL Policy (<60%, >90%, Discrepancy >30%)"]
+        
+        N5A["5a. Auto-Finalize Node (FunctionNode)\n• Persists Scorecard in DatabaseSessionService\n• Route: 'auto'"]
+        
+        N5B["5b. Teacher Dialogue Coordinator (LlmAgent Node)\n• Model: Gemini 2.5 Pro\n• Route: 'review'\n• Native HITL Pause via RequestInput\n• Awaits Teacher Review, Section Regrade, or Score Override\n• Generates Audit Trail & Unmasks Vault Identity upon Sign-off"]
     end
 
     subgraph MCP["Model Context Protocol (MCP) Boundary"]
-        MCP_TOOLSET["ADK McpToolset\n(StdioConnectionParams / stdio transport)"]
+        MCP_TOOLSET["ADK McpToolset\n(StdioConnectionParams / stdio JSON-RPC)"]
         MCP_SERVER["HungerGamesCanonMcpServer\n(mcp.server.mcpserver.MCPServer)\n• lookup_hunger_games_canon\n• fetch_exam_rubric_criteria\n• get_exemplar_answer"]
     end
 
@@ -49,39 +51,29 @@ flowchart TD
         GCP_SEC["GCP Secret Manager\n(Secure Key Injection)"]
     end
 
-    CLI --> ANON
-    API --> ANON
-    ANON --> VAULT
-    ANON --> CORR
-    CORR --> QUAL
-    QUAL --> SCORE
-    SCORE --> HITL
-    
-    %% MCP Connection
-    CORR <--> MCP_TOOLSET
-    QUAL <--> MCP_TOOLSET
-    COORD <--> MCP_TOOLSET
+    CLI --> START
+    API --> START
+    N1 --> N2
+    N2 --> N3
+    N3 --> N4
+    N4 -- route: 'auto' --> N5A
+    N4 -- route: 'review' --> N5B
+
+    N1 <--> VAULT
+    N2 <--> MCP_TOOLSET
+    N5B <--> MCP_TOOLSET
+    N5B <--> VAULT
     MCP_TOOLSET <-- stdio JSON-RPC --> MCP_SERVER
     
-    %% HITL Routing
-    HITL -- Flagged --o COORD
-    HITL -- Auto-Pass --> COORD
+    Workflow <--> SESS
+    Workflow <--> COMPACT
+    Workflow -. Async .-> ASYNC_MEM
     
-    COORD -- "Targeted Regrade" --> CORR
-    COORD -- "Targeted Regrade" --> QUAL
-    COORD -- "Unmask Identity" --> VAULT
-    
-    Pipeline <--> SESS
-    Pipeline <--> COMPACT
-    Pipeline -. Async .-> ASYNC_MEM
-    
-    Pipeline --> OTEL
-    Pipeline --> JSON_LOG
-    COORD --> OTEL
-    COORD --> JSON_LOG
+    Workflow --> OTEL
+    Workflow --> JSON_LOG
     JSON_LOG --> SCRUB
     OTEL --> SCRUB
-    GCP_SEC -. Inject API Keys .-> Pipeline
+    GCP_SEC -. Inject API Keys .-> Workflow
 ```
 
 ---
@@ -92,59 +84,48 @@ flowchart TD
 sequenceDiagram
     autonumber
     actor Teacher as Teacher / Educator
-    participant CLI as Interface / App Runner
+    participant Workflow as ADK 2.0 Workflow Engine
     participant Vault as PII Vault & Scrubber
-    participant Corr as Correctness Agent (Flash)
-    participant Qual as Quality Agent (Pro)
-    participant Synth as Scorecard Synthesizer
-    participant HITL as HITL Review Gate
-    participant Coord as Coordinator Agent (Pro)
+    participant Corr as Correctness Agent (LlmAgent Node - Flash)
+    participant MCP as HungerGamesCanonMcpServer
+    participant Qual as Quality Agent (LlmAgent Node - Pro)
+    participant Synth as Scorecard Synthesizer Node
+    participant Coord as Teacher Review Node (LlmAgent Node - Pro)
     participant Session as Session & Trace Store
 
-    Teacher->>CLI: Submit exam markdown (Name, ID, Answers)
-    CLI->>Vault: Extract Name & ID; Assign STUDENT_ANON_E7B1
-    Vault-->>Session: Store encrypted token mapping
+    Teacher->>Workflow: Submit raw exam markdown (Name, ID, Answers)
+    Workflow->>Vault: Anonymizer Node: Extract PII; Assign STUDENT_ANON_E7B1
+    Vault-->>Workflow: Anonymized Submission (Student answers without PII)
     
-    CLI->>Corr: Run Factual Evaluation (Anonymized Answers + Key)
-    Note over Corr: Gemini 2.5 Flash verifies facts<br/>against Hunger Games lore
-    Corr-->>Session: Record Intent & Correctness Scores
+    Workflow->>Corr: Run Correctness Assessor Node (Gemini 2.5 Flash)
+    Corr->>MCP: Query HungerGamesCanonMcpServer via McpToolset (stdio)
+    MCP-->>Corr: Canonical lore facts & rubric criteria
+    Corr-->>Workflow: CorrectnessEvaluation (per question scores & facts identified)
     
-    Corr->>Qual: Forward state to Writing Quality Assessor
-    Note over Qual: Gemini 2.5 Pro analyzes<br/>7th-8th grade literacy standards
-    Qual-->>Session: Record Intent & Quality Scores
+    Workflow->>Qual: Run Writing Quality Assessor Node (Gemini 2.5 Pro)
+    Note over Qual: Assesses 7th-8th grade literacy standards,<br/>textual evidence & mechanics
+    Qual-->>Workflow: QualityEvaluation (analytical depth, clarity ratings)
     
-    Qual->>Synth: Synthesize Scorecard
-    Synth->>Synth: Compute composite score & letter grade
+    Workflow->>Synth: Synthesize Scorecard & Evaluate HITL Policy
+    Synth->>Synth: Calculate overall percentage & letter grade
     
-    Synth->>HITL: Check review thresholds (<60%, >90%, discrepancy >30%)
-    alt Score < 60% or > 90% or Discrepancy > 30%
-        HITL-->>Coord: State FLAGGED_FOR_TEACHER_REVIEW
-        Coord-->>Teacher: Present Scorecard with HITL Review Alert
-    else Score Normal
-        HITL-->>Coord: State AUTO_APPROVED
-        Coord-->>Teacher: Present Finalized Scorecard
-    end
-
-    opt Teacher Feedback & Re-dispatch Loop
-        Teacher->>Coord: "Give partial credit for tracker jackers on Q2"
-        Coord->>Corr: Re-dispatch Q2 Correctness with Teacher Rationale
-        Corr-->>Coord: Updated Q2 Score
-        Coord->>Session: Append Audit Record (Prior vs. Revised Score)
-        Coord-->>Teacher: Return Updated Scorecard with Audit Diff
-    end
-
-    opt Teacher Direct Override
-        Teacher->>Coord: "Override Essay 1 writing score to 18/20 due to IEP"
-        Coord->>Coord: Apply manual override tool
-        Coord->>Session: Append Audit Record (Direct Override with justification)
-        Coord-->>Teacher: Return Updated Scorecard with Override Badge
-    end
-
-    opt Identity Unmasking
-        Teacher->>Coord: Finalize and reveal student identity
-        Coord->>Vault: Query real identity for STUDENT_ANON_E7B1
-        Vault-->>Coord: Return "Katniss Fan (ID: 10482)"
-        Coord-->>Teacher: Reveal official final grade for Katniss Fan
+    alt Normal Score (60% - 90%, Discrepancy <= 30%)
+        Synth-->>Workflow: Route 'auto'
+        Workflow->>Session: Auto-Finalize: Save scorecard to DatabaseSessionService
+        Workflow-->>Teacher: Finalized Scorecard Output
+    else Flagged Score (<60%, >90%, or Discrepancy >30%)
+        Synth-->>Workflow: Route 'review'
+        Workflow->>Coord: Invoke Teacher Review Node
+        Coord-->>Teacher: Yield RequestInput(interrupt_id="teacher_approval") [WORKFLOW PAUSES]
+        
+        Teacher->>Workflow: Resume with Teacher Decision / Override ("yes" / "override 85.0")
+        Workflow->>Coord: Resume node with ctx.resume_inputs
+        Coord->>Coord: Record AuditLogEntry (action, delta, rationale)
+        Coord->>Vault: Unmask real student identity for authorized teacher
+        Vault-->>Coord: Student Real Identity
+        Coord-->>Workflow: Final Approved Scorecard
+        Workflow->>Session: Save approved grade record
+        Workflow-->>Teacher: Final Scorecard with Audit Trail & Revealed Identity
     end
 ```
 
@@ -161,20 +142,26 @@ ai-in-5-days-svr/
 ├── README.md                         # Main repository landing page & rubric evidence
 ├── pyproject.toml                    # Poetry/uv packaging & dependencies
 ├── agents-cli-manifest.yaml          # agents-cli deployment metadata
+├── test_runner.py                    # ADK 2.0 Workflow verification suite & scenario runner
 ├── app/
 │   ├── __init__.py
-│   ├── agent.py                      # Root ADK Sequential & Coordinator orchestration
+│   ├── agent.py                      # Root ADK 2.0 Graph Workflow (root_agent = assessment_workflow)
+│   ├── workflow.py                   # Graph Workflow topology (START -> Anonymize -> Eval -> HITL)
 │   ├── cli.py                        # Interactive CLI REPL for teacher grading
 │   ├── fast_api_app.py               # Production ADK FastAPI web service
 │   ├── config.py                     # Environment variables, thresholds, models
 │   ├── constitution.py               # Robust Pedagogical Constitution (System Instructions)
 │   ├── models.py                     # Strict Pydantic schemas (Submissions, Scorecard, Audit)
+│   ├── secrets.py                    # GCP Secret Manager key resolution
 │   ├── agents/
 │   │   ├── __init__.py
 │   │   ├── correctness_agent.py      # Gemini 2.5 Flash factual assessor
 │   │   ├── quality_agent.py          # Gemini 2.5 Pro writing quality assessor
 │   │   ├── coordinator_agent.py      # Teacher dialogue coordinator & regrading
 │   │   └── scorecard_agent.py        # Scorecard synthesis & HITL threshold checker
+│   ├── mcp_server/
+│   │   ├── __init__.py
+│   │   └── canon_server.py           # HungerGamesCanonMcpServer (FastMCP stdio JSON-RPC)
 │   ├── tools/
 │   │   ├── __init__.py
 │   │   ├── anonymizer_tool.py        # PII extraction & tokenized vault tool
@@ -204,15 +191,18 @@ ai-in-5-days-svr/
 │   ├── conftest.py                   # Pytest fixtures and mock configurations
 │   ├── golden_dataset.json           # Ground-truth evaluation dataset
 │   ├── test_tools.py                 # Strict schema & error handling validation
-│   ├── test_agents.py                # Sequential agent & model routing tests
 │   ├── test_hitl_and_audit.py        # Threshold pauses & audit trail tests
 │   ├── test_observability.py         # JSON logs, Intent/Outcome, PII scrubbing tests
-│   └── test_eval_harness.py          # Automated regression evaluation harness
+│   ├── test_eval_harness.py          # Automated regression evaluation harness
+│   └── unit/
+│       └── test_dummy.py             # Base unit test verification
 └── deployment/
     ├── terraform/
     │   ├── main.tf                   # Terraform for Agent Runtime / Cloud Run
     │   ├── variables.tf              # Configurable project, region, service account
-    │   └── outputs.tf                # Service URLs and resource IDs
+    │   ├── outputs.tf                # Service URLs and resource IDs
+    │   ├── apis.tf                   # Enabled GCP APIs (Secret Manager, Vertex AI, Tracing)
+    │   └── secrets.tf                # Secret Manager declaration for GEMINI_API_KEY
     └── workflows/
         └── ci-cd.yml                 # GitHub Actions pipeline (Lint, Eval, Build, Deploy)
 ```
@@ -222,9 +212,10 @@ ai-in-5-days-svr/
 ## 4. Key Architectural Patterns & Rubric Implementation
 
 ### 1. Tool & Interface Design (20 pts)
+- **Model Context Protocol (MCP)**: Canonical domain lore, rubric criteria, and exemplars are exposed via an enterprise MCP server (`HungerGamesCanonMcpServer`) and consumed by agents using ADK's `McpToolset` over stdio JSON-RPC (`StdioConnectionParams`).
 - **Comprehensive Docstrings**: Every tool function has extensive Sphinx-style docstrings with typed parameter definitions, operational constraints, return descriptions, and usage examples.
-- **Descriptive Naming**: Granular names such as `mask_student_identifiers`, `evaluate_factual_correctness`, `evaluate_response_writing_quality`, `generate_student_scorecard`, `trigger_human_in_the_loop_review`, `regrade_assessment_section`, `override_section_score_with_audit`.
-- **Explicit JSON Schemas**: Strict Pydantic v2 schemas (`StudentSubmission`, `QuestionAnswer`, `CorrectnessResult`, `QualityResult`, `Scorecard`, `AuditEntry`) validating all inputs and constraining LLM outputs.
+- **Descriptive Naming**: Granular names such as `mask_student_identifiers`, `evaluate_factual_correctness`, `evaluate_response_writing_quality`, `generate_student_scorecard`, `trigger_human_in_the_loop_review`, `regrade_assessment_section`, `override_section_score_with_audit`, `lookup_hunger_games_canon`.
+- **Explicit JSON Schemas**: Strict Pydantic v2 schemas (`StudentSubmission`, `QuestionAnswer`, `CorrectnessEvaluation`, `QualityEvaluation`, `StudentScoreCard`, `AuditLogEntry`) validating all inputs and constraining LLM outputs.
 - **Guided Error Handling**: Tools catch errors and return structured `ToolRecoveryResponse` objects containing error descriptions, error codes, and specific remediation instructions for the calling LLM.
 
 ### 2. Context & Memory (20 pts)
@@ -234,20 +225,20 @@ ai-in-5-days-svr/
 - **Async Memory Operations**: Background consolidation via `after_agent_callback` and `asyncio.create_task` that compiles teacher preferences and class performance patterns into Memory Bank without blocking the conversational response.
 
 ### 3. Orchestration & Logic (20 pts)
-- **Multi-Agent Patterns**: A deterministic `SequentialAgent` pipeline (Anonymizer -> Correctness Assessor -> Writing Quality Assessor -> Scorecard Synthesizer) coupled with an interactive Teacher Dialogue Coordinator Agent.
+- **Multi-Agent Graph Workflow**: An ADK 2.0 Graph Workflow (`google.adk.workflow.Workflow`) where evaluation steps are specialized `LlmAgent` and `FunctionNode` nodes (`anonymize_submission_node` -> `evaluate_correctness_node` -> `evaluate_quality_node` -> `synthesize_and_route_node` -> `auto_approve_node` / `teacher_review_node`).
 - **Strategic Model Routing**:
-  - `gemini-2.5-flash`: Fast, high-throughput factual accuracy verification and answer key matching.
-  - `gemini-2.5-pro`: Deep qualitative writing evaluation, nuanced essay reasoning, and conversational coordinator reasoning.
+  - `gemini-2.5-flash`: Fast, high-throughput factual accuracy verification and answer key matching in `correctness_assessor`.
+  - `gemini-2.5-pro`: Deep qualitative writing evaluation, nuanced essay reasoning, and conversational coordinator reasoning in `quality_assessor` and `teacher_dialogue_coordinator`.
 - **Guardrails & Policy Plugins**: Input PII anonymization guardrail, canonical grounding guardrail (preventing film-canon contamination), and self-evaluation confidence scoring.
-- **Human-in-the-Loop Hooks**: Explicit execution stops triggered when overall score < 60%, > 90%, or when correctness vs. quality gap > 30%, requiring teacher authorization before final grade persistence.
+- **Human-in-the-Loop Hooks**: Explicit execution stops triggered via ADK 2.0 `@node(rerun_on_resume=True)` yielding `RequestInput(interrupt_id="teacher_approval")` when overall score < 60%, > 90%, or when correctness vs. quality gap > 30%, requiring teacher authorization before final grade persistence.
 
 ### 4. Observability & Tracing (20 pts)
 - **Structured JSON Logging**: Standardized JSON log output capturing timestamp, run ID, student pseudonym token, agent name, log level, and contextual metadata.
 - **Intent vs. Outcome Tracking**: Explicit logging of `INTENT: <planned action>` prior to execution and `OUTCOME: <actual result/delta>` following execution for full agent explainability.
-- **Distributed Tracing**: OpenTelemetry instrumentation establishing parent-child span relationships across incoming requests, agent invocations, tool executions, and LLM calls.
+- **Distributed Tracing**: OpenTelemetry instrumentation establishing parent-child span relationships across incoming requests, workflow executions, node invocations, tool executions, and LLM calls.
 - **PII Redaction**: Active regex and pattern scrubbing in log sinks and OpenTelemetry attributes ensuring zero raw student names or IDs leak to storage or telemetry backends.
 
 ### 5. Infrastructure & CI/CD (15 pts)
 - **Automated Evaluation Suite**: Automated test harness running against `golden_dataset.json` with assertions on factual accuracy tolerance, writing quality consistency, and HITL gate activation.
-- **Infrastructure as Code**: Production Terraform declarations in `deployment/terraform/` defining Google Cloud Vertex AI Agent Runtime, IAM service accounts, and telemetry sinks.
+- **Infrastructure as Code**: Production Terraform declarations in `deployment/terraform/` defining Google Cloud Vertex AI Agent Runtime, IAM service accounts, Secret Manager secrets (`gemini-api-key`), and telemetry sinks.
 - **Secure Secret Management**: Complete separation of secrets via environment variables (`.env.example`) and Google Secret Manager, with zero hardcoded API keys.
