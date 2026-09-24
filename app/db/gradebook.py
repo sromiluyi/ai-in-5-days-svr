@@ -200,6 +200,59 @@ class GradebookDatabase:
             )
             conn.commit()
 
+    def get_all_scorecards(self) -> List[StudentScoreCard]:
+        """Retrieve all stored scorecards from the persistent gradebook."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT payload_json FROM scorecards ORDER BY updated_at DESC")
+            rows = cursor.fetchall()
+            return [StudentScoreCard.model_validate_json(r["payload_json"]) for r in rows]
+
+    def get_question_class_analytics(self, question_id: str) -> Dict[str, Any]:
+        """Compute class-wide performance metrics for a specific question across all students."""
+        qid = question_id.upper().strip()
+        scorecards = self.get_all_scorecards()
+        if not scorecards:
+            return {
+                "question_id": qid,
+                "total_students": 0,
+                "message": "No other student scorecards are recorded in the gradebook yet.",
+            }
+
+        scores: List[float] = []
+        max_possible: Optional[float] = None
+        for sc in scorecards:
+            for q in sc.question_scores:
+                if q.question_id.upper() == qid:
+                    scores.append(q.total_awarded)
+                    if max_possible is None:
+                        max_possible = q.total_possible
+                    break
+
+        if not scores:
+            return {
+                "question_id": qid,
+                "total_students": 0,
+                "message": f"Question {qid} has not been assessed for any other students in the gradebook.",
+            }
+
+        avg_score = sum(scores) / len(scores)
+        pct = (avg_score / max_possible * 100.0) if max_possible else 0.0
+        return {
+            "question_id": qid,
+            "total_students": len(scores),
+            "max_possible": max_possible,
+            "class_average_score": round(avg_score, 2),
+            "class_average_percentage": round(pct, 1),
+            "highest_score": max(scores),
+            "lowest_score": min(scores),
+            "message": (
+                f"Across {len(scores)} assessed students, the class average on {qid} is "
+                f"{avg_score:.1f}/{max_possible:.1f} ({pct:.1f}%). "
+                f"Range: {min(scores):.1f} to {max(scores):.1f}."
+            ),
+        }
+
 
 gradebook_db = GradebookDatabase()
 

@@ -417,8 +417,33 @@ def apply_teacher_score_override(
 # Backwards compatibility alias
 override_section_score_with_audit = apply_teacher_score_override
 
+
+def query_class_question_analytics(
+    question_id: str,
+    tool_context: Optional[ToolContext] = None,
+) -> Dict[str, Any]:
+    """Query persistent gradebook across all assessed students to report class statistics on a question.
+
+    Args:
+        question_id: The target question ID to analyze ('Q1', 'Q2', 'Q3', 'Q4', 'Q5').
+        tool_context: Optional ADK ToolContext for session state integration.
+
+    Returns:
+        Dictionary containing total students assessed, class average, score range, and pedagogical summary.
+    """
+    qid = question_id.upper().strip()
+    log_intent("AnalyticsTool", "QUERY_CLASS_BENCHMARK", qid)
+    stats = gradebook_db.get_question_class_analytics(qid)
+    log_outcome("AnalyticsTool", "QUERY_CLASS_BENCHMARK", "SUCCESS", stats["message"])
+    return {
+        "status": "success",
+        **stats,
+    }
+
+
 __all__ = [
     "regrade_assessment_section",
     "apply_teacher_score_override",
     "override_section_score_with_audit",
+    "query_class_question_analytics",
 ]

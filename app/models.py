@@ -211,7 +211,7 @@ class HITLReviewFlag(BaseModel):
         default_factory=list,
         description="List of trigger reasons (e.g., 'SCORE_BELOW_PASSING_THRESHOLD', 'HIGH_HONORS_VERIFICATION').",
     )
-    teacher_decision: Optional[Literal["APPROVED", "REVISED", "PENDING"]] = Field(
+    teacher_decision: Optional[Literal["APPROVED", "REVISED", "PENDING", "TEACHER_CONFIRMED", "TEACHER_REJECTED"]] = Field(
         default="PENDING",
         description="Current state of human teacher approval.",
     )

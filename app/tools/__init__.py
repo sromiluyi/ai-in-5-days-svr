@@ -13,6 +13,7 @@ from app.tools.regrade_tools import (
     regrade_assessment_section,
     apply_teacher_score_override,
     override_section_score_with_audit,
+    query_class_question_analytics,
 )
 from app.mcp_server.canon_server import (
     lookup_hunger_games_canon,
@@ -30,6 +31,7 @@ __all__ = [
     "regrade_assessment_section",
     "apply_teacher_score_override",
     "override_section_score_with_audit",
+    "query_class_question_analytics",
     "lookup_hunger_games_canon",
     "fetch_exam_rubric_criteria",
     "get_exemplar_answer",

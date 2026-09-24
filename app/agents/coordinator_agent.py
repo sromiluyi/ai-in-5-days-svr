@@ -19,6 +19,7 @@ from app.tools.hitl_tools import finalize_student_grade_record
 from app.tools.regrade_tools import (
     apply_teacher_score_override,
     override_section_score_with_audit,
+    query_class_question_analytics,
     regrade_assessment_section,
 )
 
@@ -61,6 +62,7 @@ Instructions for Educator Dialogue:
    - When the teacher provides broad feedback without specifying a question number (such as "re-evaluation of essay structure" or "regrade short answers"), prompt the teacher once to clarify which question number (e.g. Q4 or Q5 for long essays, Q1-Q3 for short answers) they want adjusted.
 5. If the teacher asks to unmask or reveal the student's name, invoke `restore_student_identity_vault` (with teacher_auth=True).
 6. Provide clear, supportive pedagogical explanations for all evaluations and score changes.
+7. CLASS-WIDE COMPARISONS: If the teacher asks how other students or the class as a whole performed on a specific question, invoke `query_class_question_analytics` to pull historical benchmarks from the persistent gradebook.
 """
 
     return LlmAgent(
@@ -72,6 +74,7 @@ Instructions for Educator Dialogue:
             regrade_assessment_section,
             apply_teacher_score_override,
             override_section_score_with_audit,
+            query_class_question_analytics,
             finalize_student_grade_record,
             restore_student_identity_vault,
             canon_mcp_toolset,
