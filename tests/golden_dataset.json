@@ -1,0 +1,50 @@
+[
+  {
+    "submission_file": "data/samples/student_01_passing.md",
+    "student_name": "Jordan Rivera",
+    "student_id": "MS-8842",
+    "expected_min_score": 75.0,
+    "expected_max_score": 100.0,
+    "expected_grade": "A",
+    "expected_hitl_flag": true,
+    "expected_hitl_reason": "HIGH_HONORS_VERIFICATION",
+    "expected_correctness_min": 80.0,
+    "expected_quality_min": 75.0
+  },
+  {
+    "submission_file": "data/samples/student_02_failing.md",
+    "student_name": "Alex Vance",
+    "student_id": "MS-3301",
+    "expected_min_score": 20.0,
+    "expected_max_score": 59.9,
+    "expected_grade": "F",
+    "expected_hitl_flag": true,
+    "expected_hitl_reason": "SCORE_BELOW_PASSING_THRESHOLD",
+    "expected_correctness_min": 20.0,
+    "expected_quality_min": 20.0
+  },
+  {
+    "submission_file": "data/samples/student_03_honors.md",
+    "student_name": "Morgan Chen",
+    "student_id": "MS-9914",
+    "expected_min_score": 90.0,
+    "expected_max_score": 100.0,
+    "expected_grade": "A",
+    "expected_hitl_flag": true,
+    "expected_hitl_reason": "HIGH_HONORS_VERIFICATION",
+    "expected_correctness_min": 95.0,
+    "expected_quality_min": 90.0
+  },
+  {
+    "submission_file": "data/samples/student_04_discrepant.md",
+    "student_name": "Taylor Reed",
+    "student_id": "MS-6190",
+    "expected_min_score": 50.0,
+    "expected_max_score": 85.0,
+    "expected_grade": "B",
+    "expected_hitl_flag": true,
+    "expected_hitl_reason": "SCORE_DIMENSION_DISCREPANCY",
+    "expected_correctness_min": 70.0,
+    "expected_quality_min": 35.0
+  }
+]
