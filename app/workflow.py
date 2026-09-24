@@ -272,6 +272,13 @@ async def teacher_review_node_func(ctx: Context, node_input: dict):
             f"Requesting teacher review dialogue for token {token}",
             student_token=token,
         )
+        # 1. Emit conversational Event so the playground UI renders the review prompt bubble
+        yield Event(
+            message=prompt_message,
+            state={"scorecard": scorecard_data, "student_token": token, "review_status": "IN_REVIEW", "review_turn_count": 1},
+        )
+
+        # 2. Yield RequestInput to trigger the ADK human-in-the-loop pause gate
         yield RequestInput(
             interrupt_id="teacher_approval",
             message=prompt_message,

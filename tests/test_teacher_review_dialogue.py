@@ -72,8 +72,9 @@ async def test_initial_pause_and_quick_approval(flagged_submission_setup):
     node_input = sc.model_dump()
     events = [ev async for ev in teacher_review_node_func(ctx, node_input)]
 
-    assert len(events) == 1
-    req = events[0]
+    assert len(events) == 2
+    chat_ev, req = events[0], events[1]
+    assert token in chat_ev.message.parts[0].text
     assert hasattr(req, "interrupt_id")
     assert req.interrupt_id == "teacher_approval"
     assert token in req.message
@@ -102,7 +103,8 @@ async def test_interactive_multi_turn_dialogue_with_regrade(flagged_submission_s
 
     # 1. First pause
     events_0 = [ev async for ev in teacher_review_node_func(ctx, node_input)]
-    assert events_0[0].interrupt_id == "teacher_approval"
+    assert len(events_0) == 2
+    assert events_0[1].interrupt_id == "teacher_approval"
 
     # Define mock coordinator response for turn 1 (question) and turn 2 (regrade)
     async def mock_run_node(agent, node_input=None, **kwargs):

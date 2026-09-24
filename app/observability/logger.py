@@ -59,7 +59,7 @@ def get_structured_logger(name: str = "hunger_games_agent") -> logging.Logger:
 
     if not _logger_initialized:
         logger.setLevel(logging.INFO)
-        handler = logging.StreamHandler(sys.stdout)
+        handler = logging.StreamHandler(sys.stderr)
         handler.setFormatter(JSONFormatter())
         # Avoid duplicate handlers
         logger.handlers.clear()
