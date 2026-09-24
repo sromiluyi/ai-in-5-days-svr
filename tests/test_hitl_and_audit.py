@@ -125,3 +125,66 @@ Katniss volunteers for Prim.
     assert updated_sc.question_scores[0].total_awarded == 10.0
     assert updated_sc.question_scores[0].teacher_override_applied is True
     assert any(a.action == "DIRECT_SCORE_OVERRIDE" for a in updated_sc.audit_history)
+
+
+def test_resilient_override_without_scorecard_id_or_justification():
+    """Verify tool auto-resolves latest scorecard and generates justification when omitted."""
+    from app.tools.regrade_tools import override_section_score_with_audit
+
+    raw_md = """# Student Submission
+- **Student Name**: Resilient Tester
+- **Student ID**: MS-7766
+
+### Question 1: What act does Katniss perform?
+Volunteered for Prim.
+"""
+    anon = mask_student_identifiers(raw_md)
+    token = anon["student_token"]
+    evals = evaluate_submission_offline(anon["submission"])
+    sc = synthesize_exam_scorecard(token, evals)
+    gradebook_db.save_scorecard(sc)
+
+    # Call override with scorecard_id and justification omitted (conversational usage)
+    res = apply_teacher_score_override(
+        question_id="Q1",
+        new_score=9.0,
+    )
+    assert res["status"] == "success"
+    assert res["new_score"] == 9.0
+
+    updated_sc = gradebook_db.get_scorecard(sc.scorecard_id)
+    assert updated_sc is not None
+    assert updated_sc.question_scores[0].total_awarded == 9.0
+    # Audit trail recorded with auto-generated justification
+    assert len(updated_sc.audit_history) > 0
+    assert "Teacher direct score override" in updated_sc.audit_history[-1].rationale
+
+    # Test alias and positional shorthand invocation: override_section_score_with_audit("Q1", 8.5)
+    alias_res = override_section_score_with_audit("Q1", 8.5)
+    assert alias_res["status"] == "success"
+    assert alias_res["new_score"] == 8.5
+
+
+def test_resilient_regrade_without_scorecard_id():
+    """Verify regrade tool auto-resolves latest scorecard and auto-infers writing target."""
+    raw_md = """# Student Submission
+- **Student Name**: Regrade Tester
+- **Student ID**: MS-3322
+
+### Question 1: What act does Katniss perform?
+Volunteered for Prim.
+"""
+    anon = mask_student_identifiers(raw_md)
+    token = anon["student_token"]
+    evals = evaluate_submission_offline(anon["submission"])
+    sc = synthesize_exam_scorecard(token, evals)
+    gradebook_db.save_scorecard(sc)
+
+    # Regrade without explicit scorecard_id, specifying essay structure feedback
+    res = regrade_assessment_section(
+        question_id="Q1",
+        teacher_feedback="Strong essay structure and nuanced explanation",
+    )
+    assert res["status"] == "success"
+    assert res["agent_target"] == "writing_quality"
+

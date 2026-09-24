@@ -6,75 +6,103 @@ The **Middle School Hunger Games Assessment Agent** is engineered as an enterpri
 
 ### Sketch Architecture: Node-to-Node Workflow Data Flow
 
-The sketch below shows how data payloads (`node_input` ➔ `Event(output=..., state=...)`) flow between each node in [`app/workflow.py`](file:///usr/local/google/home/sromiluyi/projects/ai-in-5-days-svr/app/workflow.py):
+Below is a simple flow diagram and sketch showing how data payloads (`node_input` ➔ `Event(output, state, message)` & `RequestInput`) flow between each node in [`app/workflow.py`](file:///usr/local/google/home/sromiluyi/projects/ai-in-5-days-svr/app/workflow.py):
+
+```mermaid
+flowchart TD
+    START(["START: Raw Student Exam Markdown\n(Student Name, ID, Q1–Q5 Answers)"])
+    
+    N1["1. anonymize_submission_node\n• Masks PII into AnonymizerVault\n• Emits student_token & parsed answers"]
+    
+    N2["2. evaluate_correctness_node\n• Evaluates Q1–Q5 factual recall vs. Book 1 Canon\n• Appends correctness scores & justifications"]
+    
+    N3["3. evaluate_quality_node\n• Evaluates 7th–8th Grade ELA claims, evidence & mechanics\n• Appends writing_quality scores & ratings"]
+    
+    N4["4. synthesize_and_route_node\n• Builds StudentScoreCard & saves to gradebook_db\n• Checks HITL policy (<60%, >90%, or >30% gap)"]
+    
+    N5A["5a. auto_approve_node\n• Sets review_status = AUTO_APPROVED_RECORDED\n• Emits Finalized Grade Event"]
+    
+    N5B["5b. teacher_review_node (@node rerun_on_resume=True)\n• Turn 0: Yields Event(message) + RequestInput('teacher_approval')\n• On Resume (ctx.resume_inputs):"]
+    
+    COORD["coordinator_agent (LlmAgent)\nctx.run_node(coordinator_agent, node_input=user_text, run_id='dialogue_turn_N')\n• State injected: {student_token}, {scorecard}\n• Tools: regrade_assessment_section, apply_teacher_score_override, canon_mcp_toolset"]
+    
+    FINAL(["Finalized Grade Event\n• Unmasks identity from AnonymizerVault\n• Saves confirmed StudentScoreCard & AuditLogEntry to gradebook_db"])
+
+    START -->|"raw_md (str / Content)"| N1
+    N1 -->|"Event.output:\n{student_token, submission}"| N2
+    N2 -->|"Event.output:\n{student_token, evaluations}"| N3
+    N3 -->|"Event.output:\n{student_token, evaluations}"| N4
+    
+    N4 -->|"route = 'auto'\nEvent.output: scorecard_dict\nctx.state['scorecard']"| N5A
+    N4 -->|"route = 'review'\nEvent.output: scorecard_dict\nctx.state['scorecard']"| N5B
+    
+    N5B -->|"Question / Regrade / Override\n(user_text)"| COORD
+    COORD -->|"Syncs gradebook_db & ctx.state['scorecard']\nYields Event(agent_reply) + RequestInput('teacher_dialogue_N+1')"| N5B
+    N5B -->|"Teacher types 'approve' / 'yes'"| FINAL
+```
+
+#### ASCII Sketch of Node Data Transformation
 
 ```text
-  [ Raw Student Exam Markdown (Name, ID, Q1–Q5 Answers) ]
-                             │
-                             ▼ (START)
-┌─────────────────────────────────────────────────────────────────────────┐
-│ 1. anonymize_submission_node                                            │
-│    • Extracts Name & ID ──► Isolated PII Vault (AnonymizerVault)        │
-│    • Replaces identity with token: "STUDENT_ANON_XXXX"                  │
-└─────────────────────────────────────────────────────────────────────────┘
-                             │
-      Event.output / state:  │  { "student_token": "STUDENT_ANON_XXXX",
-                             │    "submission": { "answers": [Q1..Q5] } }
-                             ▼
-┌─────────────────────────────────────────────────────────────────────────┐
-│ 2. evaluate_correctness_node (Gemini 2.5 Flash + Canon MCP Toolset)     │
-│    • Verifies Q1–Q5 answers against Hunger Games Book 1 canon           │
-└─────────────────────────────────────────────────────────────────────────┘
-                             │
-      Event.output:          │  { "student_token": "STUDENT_ANON_XXXX",
-                             │    "evaluations": [ {Q1..Q5 correctness} ] }
-                             ▼
-┌─────────────────────────────────────────────────────────────────────────┐
-│ 3. evaluate_quality_node (Gemini 2.5 Pro)                               │
-│    • Evaluates 7th–8th grade ELA claim clarity, evidence, & mechanics   │
-└─────────────────────────────────────────────────────────────────────────┘
-                             │
-      Event.output:          │  { "student_token": "STUDENT_ANON_XXXX",
-                             │    "evaluations": [ {Q1..Q5 correctness + quality} ] }
-                             ▼
-┌─────────────────────────────────────────────────────────────────────────┐
-│ 4. synthesize_and_route_node                                            │
-│    • Builds StudentScoreCard (total_score, overall_percentage, grade)   │
-│    • Saves to scorecard_db & ctx.state["scorecard"]                     │
-│    • Evaluates HITL triggers: Score <60% | Score >90% | Gap >30%        │
-└─────────────────────────────────────────────────────────────────────────┘
-              │                                            │
-   route="auto" (Normal)                        route="review" (Flagged)
-   Event.output: StudentScoreCard dict          Event.output: StudentScoreCard dict
-              │                                            │
-              ▼                                            ▼
-┌───────────────────────────────┐        ┌───────────────────────────────────────────────────┐
-│ 5a. auto_approve_node         │        │ 5b. teacher_review_node (@node(rerun_on_resume))  │
-│  • Sets AUTO_APPROVED_RECORDED│        │  • Turn 0: Yields RequestInput("teacher_approval")│
-│  • Emits Final Grade Event    │        │  • On Resume (ctx.resume_inputs):                 │
-└───────────────────────────────┘        │    ├─ "approve" / "yes":                          │
-                                         │    │    Unmasks PII Vault + Finalizes Grade Event │
-                                         │    ├─ "reject" / "no":                            │
-                                         │    │    Marks TEACHER_REJECTED Event              │
-                                         │    └─ Question / Regrade / Override:              │
-                                         │         Calls ctx.run_node(coordinator_agent)     │
-                                         │         Updates ctx.state["scorecard"] & AuditLog │
-                                         │         Loops via RequestInput("teacher_dialogue")│
-                                         └───────────────────────────────────────────────────┘
+  [ Raw Exam Markdown: Name, ID, Q1..Q5 ]
+                     │
+                     ▼
+  ┌──────────────────────────────────────┐
+  │ 1. anonymize_submission_node         │──► AnonymizerVault (Name, ID <-> STUDENT_ANON_XXXX)
+  └──────────────────────────────────────┘
+                     │  output & ctx.state: { student_token, submission: { answers: [Q1..Q5] } }
+                     ▼
+  ┌──────────────────────────────────────┐
+  │ 2. evaluate_correctness_node         │──► Canon MCP Server (lookup_hunger_games_canon)
+  └──────────────────────────────────────┘
+                     │  output: { student_token, evaluations: [ Q1..Q5 correctness ] }
+                     ▼
+  ┌──────────────────────────────────────┐
+  │ 3. evaluate_quality_node             │
+  └──────────────────────────────────────┘
+                     │  output: { student_token, evaluations: [ Q1..Q5 correctness + writing_quality ] }
+                     ▼
+  ┌──────────────────────────────────────┐
+  │ 4. synthesize_and_route_node         │──► gradebook_db.save_scorecard(StudentScoreCard)
+  └──────────────────────────────────────┘
+         │                           │
+         │ route="auto"              │ route="review" (<60%, >90%, or gap >30%)
+         │ output: scorecard_dict    │ output & ctx.state["scorecard"]: scorecard_dict
+         ▼                           ▼
+  ┌──────────────────┐      ┌────────────────────────────────────────────────────────────┐
+  │ 5a. auto_approve │      │ 5b. teacher_review_node (@node(rerun_on_resume=True))      │
+  │     _node        │      │                                                            │
+  └──────────────────┘      │  • Turn 0 (No resume_inputs):                              │
+         │                  │      1. yield Event(message=prompt_message, state=...)     │
+         ▼                  │      2. yield RequestInput(interrupt_id="teacher_approval")│
+  [ Auto-Approved ]         │                                                            │
+                            │  • Turn N (On resume_inputs[latest_interrupt_id]):         │
+                            │      ├─ "approve" / "yes":                                 │
+                            │      │     gradebook_db.save_scorecard()                   │
+                            │      │     restore_student_identity_vault()                │
+                            │      │     yield Event(output=final_dict, state=...)       │
+                            │      └─ Question / Regrade / Override (user_text):         │
+                            │            ctx.run_node(coordinator_agent,                 │
+                            │                         node_input=user_text,              │
+                            │                         run_id=f"dialogue_turn_{turn}")    │
+                            │            sync ctx.state["scorecard"] <-- gradebook_db    │
+                            │            1. yield Event(message=agent_reply, state=...)  │
+                            │            2. yield RequestInput("teacher_dialogue_{N+1}") │
+                            └────────────────────────────────────────────────────────────┘
 ```
 
 #### Node Input / Output Data Contracts
 
-| Workflow Edge (`Source` ➔ `Target`) | Payload Passed (`Event.output` ➔ `node_input`) | Session State Updated (`ctx.state`) |
+| Workflow Edge (`Source` ➔ `Target`) | Payload Passed (`Event.output` ➔ `node_input`) | Session State (`ctx.state`) & External Store (`gradebook_db`) |
 |---|---|---|
-| `START` ➔ `anonymize_submission_node` | Raw markdown string or `Content` parts | — |
-| `anonymize_submission_node` ➔ `evaluate_correctness_node` | `{"student_token": str, "submission": dict}` | `student_token`, `submission` |
-| `evaluate_correctness_node` ➔ `evaluate_quality_node` | `{"student_token": str, "evaluations": list[dict]}` | — |
-| `evaluate_quality_node` ➔ `synthesize_and_route_node` | `{"student_token": str, "evaluations": list[dict]}` | — |
-| `synthesize_and_route_node` ➔ `auto_approve_node` (`route="auto"`) | `StudentScoreCard.model_dump()` | `scorecard`, `student_token`, `review_status="AUTO_APPROVED"` |
-| `synthesize_and_route_node` ➔ `teacher_review_node` (`route="review"`) | `StudentScoreCard.model_dump()` | `scorecard`, `student_token`, `review_status="FLAGGED_FOR_HITL"` |
-| `teacher_review_node` ⟲ `coordinator_agent` (`ctx.run_node`) | `user_text` (Teacher question / regrade / override) | `review_turn_count`, `scorecard`, `coordinator_response`, `ctx.session.events` |
-| `teacher_review_node` ➔ **END** (`"approve"`) | Final `StudentScoreCard` dict + unmasked `student_name`, `student_id` | `scorecard`, `review_status="TEACHER_CONFIRMED"` |
+| `START` ➔ `anonymize_submission_node` | Raw markdown string or `Content` parts | Stores `{student_name, student_id}` in `AnonymizerVault`; sets `ctx.state["student_token"]`, `ctx.state["submission"]` |
+| `anonymize_submission_node` ➔ `evaluate_correctness_node` | `{"student_token": str, "submission": dict}` | Reads `answers` from `node_input["submission"]` |
+| `evaluate_correctness_node` ➔ `evaluate_quality_node` | `{"student_token": str, "evaluations": list[dict]}` | Passes per-question evaluations forward |
+| `evaluate_quality_node` ➔ `synthesize_and_route_node` | `{"student_token": str, "evaluations": list[dict]}` | Persists `StudentScoreCard` to `gradebook_db` (`app/db/gradebook.py`) |
+| `synthesize_and_route_node` ➔ `auto_approve_node` (`route="auto"`) | `StudentScoreCard.model_dump()` | `ctx.state`: `scorecard`, `student_token`, `review_status="AUTO_APPROVED"` |
+| `synthesize_and_route_node` ➔ `teacher_review_node` (`route="review"`) | `StudentScoreCard.model_dump()` | `ctx.state`: `scorecard`, `student_token`, `review_status="FLAGGED_FOR_HITL"` |
+| `teacher_review_node` ⟲ `coordinator_agent` (`ctx.run_node`) | `node_input=user_text`, `run_id=f"dialogue_turn_{turn}"` | Injects `{student_token}`, `{scorecard}`; tools update `gradebook_db`; syncs `ctx.state["scorecard"]`; conversation history stored in `ctx.session.events` |
+| `teacher_review_node` ➔ **END** (`"approve"`) | `final_dict` (`StudentScoreCard` + unmasked `student_name`, `student_id`) | Updates `gradebook_db` (`TEACHER_CONFIRMED`) & `ctx.state["review_status"] = "TEACHER_CONFIRMED"` |
 
 ---
 

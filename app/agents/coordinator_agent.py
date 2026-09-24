@@ -16,7 +16,11 @@ from app.constitution import COORDINATOR_INSTRUCTIONS, PEDAGOGICAL_CONSTITUTION
 from app.mcp_server.canon_server import get_canon_mcp_toolset
 from app.tools.anonymizer_tool import restore_student_identity_vault
 from app.tools.hitl_tools import finalize_student_grade_record
-from app.tools.regrade_tools import apply_teacher_score_override, regrade_assessment_section
+from app.tools.regrade_tools import (
+    apply_teacher_score_override,
+    override_section_score_with_audit,
+    regrade_assessment_section,
+)
 
 
 def create_coordinator_agent(model_override: Optional[str] = None) -> LlmAgent:
@@ -48,9 +52,13 @@ Current Session State:
 
 Instructions for Educator Dialogue:
 1. You converse with the classroom teacher about this student's assessment.
-2. Answer their questions about specific exam questions, rubric criteria, or Suzanne Collins' The Hunger Games lore using the canon MCP toolset.
-3. If the teacher asks to regrade a question or provides rubric feedback, invoke `regrade_assessment_section`.
-4. If the teacher specifies an override score, invoke `apply_teacher_score_override`.
+2. Answer teacher questions about specific exam questions, rubric criteria, or Suzanne Collins' The Hunger Games lore using the canon MCP toolset.
+3. ACTION-FIRST EXECUTION:
+   - When the teacher specifies an override (e.g. "Override Q3 to 5", "Change Q4 score to 18") or requests a regrade for a specific question (e.g. "Regrade Q2 with 2 more points for tracker jackers"), IMMEDIATELY invoke `apply_teacher_score_override` or `regrade_assessment_section`.
+   - Never interrogate the teacher for technical parameters (e.g. scorecard_id or system dimensions)—the tools automatically resolve scorecard context and default dimensions from state.
+   - If the teacher provides justification, pass it; otherwise let the tool auto-generate the audit rationale.
+4. AMBIGUOUS OR UNSPECIFIED QUESTIONS:
+   - When the teacher provides broad feedback without specifying a question number (such as "re-evaluation of essay structure" or "regrade short answers"), prompt the teacher once to clarify which question number (e.g. Q4 or Q5 for long essays, Q1-Q3 for short answers) they want adjusted.
 5. If the teacher asks to unmask or reveal the student's name, invoke `restore_student_identity_vault` (with teacher_auth=True).
 6. Provide clear, supportive pedagogical explanations for all evaluations and score changes.
 """
@@ -63,6 +71,7 @@ Instructions for Educator Dialogue:
         tools=[
             regrade_assessment_section,
             apply_teacher_score_override,
+            override_section_score_with_audit,
             finalize_student_grade_record,
             restore_student_identity_vault,
             canon_mcp_toolset,

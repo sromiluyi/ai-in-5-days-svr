@@ -150,6 +150,18 @@ class GradebookDatabase:
                 return StudentScoreCard.model_validate_json(row["payload_json"])
         return None
 
+    def get_latest_scorecard(self) -> Optional[StudentScoreCard]:
+        """Retrieve the most recently updated scorecard from the gradebook."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT payload_json FROM scorecards ORDER BY updated_at DESC LIMIT 1"
+            )
+            row = cursor.fetchone()
+            if row:
+                return StudentScoreCard.model_validate_json(row["payload_json"])
+        return None
+
     def append_audit_entry(self, scorecard_id: str, entry: AuditLogEntry) -> None:
         """Append an audit record to the gradebook audit trail."""
         with self._get_connection() as conn:
