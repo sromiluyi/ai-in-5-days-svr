@@ -13,7 +13,7 @@ import sys
 from typing import Any, Dict, List, Optional
 from pydantic import BaseModel, Field
 
-from mcp.server.mcpserver import MCPServer
+from mcp.server.fastmcp import FastMCP
 from google.adk.tools.mcp_tool import McpToolset
 from google.adk.tools.mcp_tool.mcp_session_manager import StdioConnectionParams
 
@@ -153,10 +153,9 @@ EXEMPLAR_ANSWERS: Dict[str, str] = {
 
 
 # Initialize MCP Server instance
-server = MCPServer(
+server = FastMCP(
     name="hunger_games_canon_server",
     instructions="Provides canonical book facts and official middle school ELA exam rubrics for The Hunger Games.",
-    version="1.0.0",
 )
 
 
