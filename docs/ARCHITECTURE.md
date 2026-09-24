@@ -4,6 +4,80 @@
 
 The **Middle School Hunger Games Assessment Agent** is engineered as an enterprise-grade, privacy-preserving **ADK 2.0 Graph Workflow** (`google.adk.workflow.Workflow`) where the primary evaluation steps are executed by specialized **`LlmAgent` nodes**, backed by the Model Context Protocol (MCP) for ground-truth canon retrieval and native Human-in-the-Loop hooks.
 
+### Sketch Architecture: Node-to-Node Workflow Data Flow
+
+The sketch below shows how data payloads (`node_input` ➔ `Event(output=..., state=...)`) flow between each node in [`app/workflow.py`](file:///usr/local/google/home/sromiluyi/projects/ai-in-5-days-svr/app/workflow.py):
+
+```text
+  [ Raw Student Exam Markdown (Name, ID, Q1–Q5 Answers) ]
+                             │
+                             ▼ (START)
+┌─────────────────────────────────────────────────────────────────────────┐
+│ 1. anonymize_submission_node                                            │
+│    • Extracts Name & ID ──► Isolated PII Vault (AnonymizerVault)        │
+│    • Replaces identity with token: "STUDENT_ANON_XXXX"                  │
+└─────────────────────────────────────────────────────────────────────────┘
+                             │
+      Event.output / state:  │  { "student_token": "STUDENT_ANON_XXXX",
+                             │    "submission": { "answers": [Q1..Q5] } }
+                             ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│ 2. evaluate_correctness_node (Gemini 2.5 Flash + Canon MCP Toolset)     │
+│    • Verifies Q1–Q5 answers against Hunger Games Book 1 canon           │
+└─────────────────────────────────────────────────────────────────────────┘
+                             │
+      Event.output:          │  { "student_token": "STUDENT_ANON_XXXX",
+                             │    "evaluations": [ {Q1..Q5 correctness} ] }
+                             ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│ 3. evaluate_quality_node (Gemini 2.5 Pro)                               │
+│    • Evaluates 7th–8th grade ELA claim clarity, evidence, & mechanics   │
+└─────────────────────────────────────────────────────────────────────────┘
+                             │
+      Event.output:          │  { "student_token": "STUDENT_ANON_XXXX",
+                             │    "evaluations": [ {Q1..Q5 correctness + quality} ] }
+                             ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│ 4. synthesize_and_route_node                                            │
+│    • Builds StudentScoreCard (total_score, overall_percentage, grade)   │
+│    • Saves to scorecard_db & ctx.state["scorecard"]                     │
+│    • Evaluates HITL triggers: Score <60% | Score >90% | Gap >30%        │
+└─────────────────────────────────────────────────────────────────────────┘
+              │                                            │
+   route="auto" (Normal)                        route="review" (Flagged)
+   Event.output: StudentScoreCard dict          Event.output: StudentScoreCard dict
+              │                                            │
+              ▼                                            ▼
+┌───────────────────────────────┐        ┌───────────────────────────────────────────────────┐
+│ 5a. auto_approve_node         │        │ 5b. teacher_review_node (@node(rerun_on_resume))  │
+│  • Sets AUTO_APPROVED_RECORDED│        │  • Turn 0: Yields RequestInput("teacher_approval")│
+│  • Emits Final Grade Event    │        │  • On Resume (ctx.resume_inputs):                 │
+└───────────────────────────────┘        │    ├─ "approve" / "yes":                          │
+                                         │    │    Unmasks PII Vault + Finalizes Grade Event │
+                                         │    ├─ "reject" / "no":                            │
+                                         │    │    Marks TEACHER_REJECTED Event              │
+                                         │    └─ Question / Regrade / Override:              │
+                                         │         Calls ctx.run_node(coordinator_agent)     │
+                                         │         Updates ctx.state["scorecard"] & AuditLog │
+                                         │         Loops via RequestInput("teacher_dialogue")│
+                                         └───────────────────────────────────────────────────┘
+```
+
+#### Node Input / Output Data Contracts
+
+| Workflow Edge (`Source` ➔ `Target`) | Payload Passed (`Event.output` ➔ `node_input`) | Session State Updated (`ctx.state`) |
+|---|---|---|
+| `START` ➔ `anonymize_submission_node` | Raw markdown string or `Content` parts | — |
+| `anonymize_submission_node` ➔ `evaluate_correctness_node` | `{"student_token": str, "submission": dict}` | `student_token`, `submission` |
+| `evaluate_correctness_node` ➔ `evaluate_quality_node` | `{"student_token": str, "evaluations": list[dict]}` | — |
+| `evaluate_quality_node` ➔ `synthesize_and_route_node` | `{"student_token": str, "evaluations": list[dict]}` | — |
+| `synthesize_and_route_node` ➔ `auto_approve_node` (`route="auto"`) | `StudentScoreCard.model_dump()` | `scorecard`, `student_token`, `review_status="AUTO_APPROVED"` |
+| `synthesize_and_route_node` ➔ `teacher_review_node` (`route="review"`) | `StudentScoreCard.model_dump()` | `scorecard`, `student_token`, `review_status="FLAGGED_FOR_HITL"` |
+| `teacher_review_node` ⟲ `coordinator_agent` (`ctx.run_node`) | `user_text` (Teacher question / regrade / override) | `review_turn_count`, `scorecard`, `coordinator_response`, `ctx.session.events` |
+| `teacher_review_node` ➔ **END** (`"approve"`) | Final `StudentScoreCard` dict + unmasked `student_name`, `student_id` | `scorecard`, `review_status="TEACHER_CONFIRMED"` |
+
+---
+
 ### High-Level Architecture Flowchart
 
 ```mermaid
@@ -123,7 +197,7 @@ sequenceDiagram
         opt Multi-Turn Educator Dialogue (Questions, Regrade, Override, Unmask)
             Coord->>Coord: Execute coordinator_agent via ctx.run_node(coordinator_agent, node_input=user_text)
             Coord->>MCP: Query canon / rubric or invoke regrade_assessment_section / apply_teacher_score_override
-            Coord->>Session: Sync updated StudentScoreCard & AuditLogEntry to scorecard_db & ctx.state["scorecard"]
+            Coord->>Session: Sync updated StudentScoreCard & AuditLogEntry to gradebook_db & ctx.state["scorecard"]
             Coord-->>Teacher: Yield RequestInput(interrupt_id="teacher_dialogue_{turn+1}") [MULTI-TURN LOOP]
         end
         Teacher->>Workflow: Type "approve" / "yes"
@@ -131,7 +205,7 @@ sequenceDiagram
         Coord->>Vault: Unmask real student identity via restore_student_identity_vault(token, teacher_auth=True)
         Vault-->>Coord: Student Real Identity (Name & ID)
         Coord-->>Workflow: Final Approved Scorecard Event
-        Workflow->>Session: Save approved grade record in scorecard_db & ctx.state
+        Workflow->>Session: Save approved grade record in gradebook_db & ctx.state
         Workflow-->>Teacher: Final Scorecard with Audit Trail & Revealed Identity
     end
 ```
@@ -229,7 +303,7 @@ ai-in-5-days-svr/
 - **Robust System Constitution**: A comprehensive pedagogical constitution defining persona, domain boundaries (Suzanne Collins' *The Hunger Games* Book 1 only), 7th–8th grade developmental writing expectations, and fairness policies.
 - **Dynamic State Injection**: `coordinator_agent` (`LlmAgent`) injects `{student_token}` and `{scorecard}` directly from `ctx.state` into its instruction prompt and tracks multi-turn conversation history automatically via `ctx.session.events`.
 - **History Compaction**: Integration of ADK `EventsCompactionConfig` with token-based thresholding (32,000 tokens) and sliding window event retention (`event_retention_size=5`) to prevent context bloat during extended teacher dialogue.
-- **Persistent Session State**: Automatic integration with Google Cloud Agent Runtime's `VertexAiSessionService` in production, with local SQLite `DatabaseSessionService` and `ScorecardDatabase` (`hunger_games_agent_sessions.db`) for persistence.
+- **Persistent Session State & Gradebook Storage**: Native conversation history managed via Google Cloud Agent Runtime's `VertexAiSessionService` in production (and ADK's built-in `.adk/session.db` in dev), with an external `GradebookDatabase` (`gradebook.db`) for permanent school gradebook records and audit trails.
 - **Async Memory Operations**: Background consolidation via `after_agent_callback` and `asyncio.create_task` that compiles teacher preferences and class performance patterns into Memory Bank without blocking the conversational response.
 
 ### 3. Orchestration & Logic (20 pts)

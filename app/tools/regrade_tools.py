@@ -13,7 +13,7 @@ from datetime import datetime, timezone
 from typing import Any, Dict, Literal, Optional
 from google.adk.tools import ToolContext
 
-from app.memory.session_service import scorecard_db
+from app.db.gradebook import gradebook_db
 from app.models import AuditLogEntry, StudentScoreCard, ToolRecoveryResponse
 from app.observability.logger import log_intent, log_outcome
 
@@ -78,7 +78,7 @@ def regrade_assessment_section(
             scorecard = raw_sc
 
     if not scorecard and scorecard_id:
-        scorecard = scorecard_db.get_scorecard(scorecard_id)
+        scorecard = gradebook_db.get_scorecard(scorecard_id)
 
     if not scorecard:
         return ToolRecoveryResponse(
@@ -150,8 +150,8 @@ def regrade_assessment_section(
         rationale=teacher_feedback,
     )
     scorecard.audit_history.append(audit_entry)
-    scorecard_db.save_scorecard(scorecard)
-    scorecard_db.append_audit_entry(scorecard.scorecard_id, audit_entry)
+    gradebook_db.save_scorecard(scorecard)
+    gradebook_db.append_audit_entry(scorecard.scorecard_id, audit_entry)
     if tool_context and hasattr(tool_context, "state"):
         tool_context.state["scorecard"] = scorecard.model_dump()
 
@@ -222,7 +222,7 @@ def apply_teacher_score_override(
             scorecard = raw_sc
 
     if not scorecard and scorecard_id:
-        scorecard = scorecard_db.get_scorecard(scorecard_id)
+        scorecard = gradebook_db.get_scorecard(scorecard_id)
 
     if not scorecard:
         return ToolRecoveryResponse(
@@ -305,8 +305,8 @@ def apply_teacher_score_override(
         rationale=justification,
     )
     scorecard.audit_history.append(audit_entry)
-    scorecard_db.save_scorecard(scorecard)
-    scorecard_db.append_audit_entry(scorecard.scorecard_id, audit_entry)
+    gradebook_db.save_scorecard(scorecard)
+    gradebook_db.append_audit_entry(scorecard.scorecard_id, audit_entry)
     if tool_context and hasattr(tool_context, "state"):
         tool_context.state["scorecard"] = scorecard.model_dump()
 

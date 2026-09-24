@@ -42,12 +42,18 @@ class AppConfig:
         default_factory=lambda: os.getenv("ASSESSMENT_PRO_MODEL", "gemini-2.5-pro")
     )
 
-    # Session storage
-    db_url: str = field(
+    # External Gradebook / School SIS storage
+    gradebook_db_url: str = field(
         default_factory=lambda: os.getenv(
-            "SESSION_DB_URL", "sqlite:///hunger_games_agent_sessions.db"
+            "GRADEBOOK_DB_URL",
+            os.getenv("SESSION_DB_URL", "sqlite:///gradebook.db"),
         )
     )
+
+    @property
+    def db_url(self) -> str:
+        """Backward-compatible alias for gradebook_db_url."""
+        return self.gradebook_db_url
 
     # Context compaction
     compaction_token_threshold: int = 32000

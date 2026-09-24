@@ -12,7 +12,7 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 from google.adk.tools import ToolContext
 
-from app.memory.session_service import scorecard_db
+from app.db.gradebook import gradebook_db
 from app.models import (
     CorrectnessEvaluation,
     HITLReviewFlag,
@@ -157,8 +157,8 @@ def synthesize_exam_scorecard(
         hitL_review=hitl_flag,
     )
 
-    # Persist in database
-    scorecard_db.save_scorecard(scorecard)
+    # Persist in external gradebook database
+    gradebook_db.save_scorecard(scorecard)
 
     log_outcome(
         "ScorecardSynthesizer",

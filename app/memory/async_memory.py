@@ -12,7 +12,7 @@ from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 from google.adk.agents.callback_context import CallbackContext
 
-from app.memory.session_service import scorecard_db
+from app.db.gradebook import gradebook_db
 from app.observability.logger import log_intent, log_outcome
 
 
@@ -45,17 +45,9 @@ class AsyncMemoryConsolidator:
             # Record consolidated teacher preferences into persistent storage
             if teacher_feedback:
                 pref_key = f"teacher_note:{student_token}:{int(datetime.now(timezone.utc).timestamp())}"
-                with scorecard_db._get_connection() as conn:
-                    cursor = conn.cursor()
-                    cursor.execute(
-                        """
-                        INSERT INTO teacher_preferences (key, value, updated_at)
-                        VALUES (?, ?, ?)
-                        ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at
-                        """,
-                        (pref_key, teacher_feedback, datetime.now(timezone.utc).isoformat()),
-                    )
-                    conn.commit()
+                gradebook_db.save_teacher_preference(
+                    pref_key, teacher_feedback, datetime.now(timezone.utc).isoformat()
+                )
 
             log_outcome(
                 "AsyncMemoryConsolidator",

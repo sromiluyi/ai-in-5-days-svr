@@ -61,14 +61,14 @@ Following **Spec-Driven Development (SDD)** principles, every node, tool, data c
      - Sets `ctx.state["review_turn_count"] = 1` and `ctx.state["review_status"] = "IN_REVIEW"`.
      - Yields `RequestInput(interrupt_id="teacher_approval", message=prompt_message)` summarizing the pseudonym token, calculated score, trigger reasons, and available educator actions.
   2. **Quick Approval (`"yes"`, `"approve"`, `"confirm"`, `"finalize"`, etc.)**:
-     - Updates `hitL_review.teacher_decision = "TEACHER_CONFIRMED"`, persists the scorecard to `scorecard_db`, unmasks the student identity via `restore_student_identity_vault(token, teacher_auth=True)`, and yields the final `Event`.
+     - Updates `hitL_review.teacher_decision = "TEACHER_CONFIRMED"`, persists the scorecard to `gradebook_db`, unmasks the student identity via `restore_student_identity_vault(token, teacher_auth=True)`, and yields the final `Event`.
   3. **Explicit Rejection (`"no"`, `"reject"`, `"rejected"`)**:
-     - Updates `hitL_review.teacher_decision = "TEACHER_REJECTED"`, persists to `scorecard_db`, unmasks student identity, and yields rejection `Event`.
+     - Updates `hitL_review.teacher_decision = "TEACHER_REJECTED"`, persists to `gradebook_db`, unmasks student identity, and yields rejection `Event`.
   4. **Interactive Educator Dialogue Turn (Any question, regrade instruction, or override command)**:
      - Increments `ctx.state["review_turn_count"] = turn + 1`.
-     - Executes `coordinator_agent` natively via `await ctx.run_node(coordinator_agent, node_input=user_text)`.
+     - Executes `coordinator_agent` natively via `await ctx.run_node(coordinator_agent, node_input=user_text, run_id=f"dialogue_turn_{turn}")`.
      - `coordinator_agent` receives `{student_token}` and `{scorecard}` via ADK dynamic instruction state injection and retains conversation history automatically in `ctx.session.events`.
-     - `coordinator_agent` invokes the appropriate tool (`regrade_assessment_section`, `apply_teacher_score_override`, `restore_student_identity_vault`, or `canon_mcp_toolset`), synchronizes `ctx.state["scorecard"]` with `scorecard_db`, and yields a follow-up `RequestInput(interrupt_id=f"teacher_dialogue_{turn + 1}", message=follow_up_prompt)` until the educator approves or rejects.
+     - `coordinator_agent` invokes the appropriate tool (`regrade_assessment_section`, `apply_teacher_score_override`, `restore_student_identity_vault`, or `canon_mcp_toolset`), synchronizes `ctx.state["scorecard"]` with `gradebook_db`, and yields a follow-up `RequestInput(interrupt_id=f"teacher_dialogue_{turn + 1}", message=follow_up_prompt)` until the educator approves or rejects.
 
 ---
 
@@ -103,7 +103,7 @@ Implemented in [`app/mcp_server/canon_server.py`](file:///usr/local/google/home/
 - [`evaluate_factual_correctness(...)`](file:///usr/local/google/home/sromiluyi/projects/ai-in-5-days-svr/app/tools/evaluation_tools.py) & [`evaluate_response_writing_quality(...)`](file:///usr/local/google/home/sromiluyi/projects/ai-in-5-days-svr/app/tools/evaluation_tools.py): Structured evaluation tools with guided error recovery.
 - [`regrade_assessment_section(scorecard_id, question_id, agent_target, teacher_feedback)`](file:///usr/local/google/home/sromiluyi/projects/ai-in-5-days-svr/app/tools/regrade_tools.py): Re-evaluates a targeted question dimension (`correctness` or `writing_quality`) with educator feedback, recalculates composite scores, and appends a `SECTION_REGRADE_DISPATCH` `AuditLogEntry`.
 - [`apply_teacher_score_override(scorecard_id, question_id, dimension, new_score, justification)`](file:///usr/local/google/home/sromiluyi/projects/ai-in-5-days-svr/app/tools/regrade_tools.py): Applies an explicit teacher score override within `[0, max_points]`, recalculates totals, and appends a `DIRECT_SCORE_OVERRIDE` `AuditLogEntry`.
-- [`finalize_student_grade_record(scorecard_id, teacher_decision, teacher_notes)`](file:///usr/local/google/home/sromiluyi/projects/ai-in-5-days-svr/app/tools/hitl_tools.py): Persists final teacher sign-off in `scorecard_db`.
+- [`finalize_student_grade_record(scorecard_id, teacher_decision, teacher_notes)`](file:///usr/local/google/home/sromiluyi/projects/ai-in-5-days-svr/app/tools/hitl_tools.py): Persists final teacher sign-off in `gradebook_db`.
 
 ---
 
@@ -111,7 +111,8 @@ Implemented in [`app/mcp_server/canon_server.py`](file:///usr/local/google/home/
 
 1. **Context Compaction & Persistent Session Memory (`app/memory/`)**:
    - `EventsCompactionConfig` (`token_threshold=32000`, `event_retention_size=5`, `compaction_interval=3`) in [`app/memory/compaction.py`](file:///usr/local/google/home/sromiluyi/projects/ai-in-5-days-svr/app/memory/compaction.py).
-   - Persistent SQLite session state (`DatabaseSessionService`) and `ScorecardDatabase` in [`app/memory/session_service.py`](file:///usr/local/google/home/sromiluyi/projects/ai-in-5-days-svr/app/memory/session_service.py).
+   - ADK Session Services (`VertexAiSessionService` / `InMemorySessionService`) in [`app/memory/session_service.py`](file:///usr/local/google/home/sromiluyi/projects/ai-in-5-days-svr/app/memory/session_service.py).
+   - Persistent external Gradebook Database (`gradebook.db`) in [`app/db/gradebook.py`](file:///usr/local/google/home/sromiluyi/projects/ai-in-5-days-svr/app/db/gradebook.py).
    - Non-blocking background memory consolidation (`after_agent_callback` + `asyncio.create_task`) in [`app/memory/async_memory.py`](file:///usr/local/google/home/sromiluyi/projects/ai-in-5-days-svr/app/memory/async_memory.py).
 2. **Observability, Intent/Outcome Logging & PII Scrubbing (`app/observability/`)**:
    - Structured JSON logs with explicit `log_intent` (before node/tool execution) and `log_outcome` (after execution) in [`app/observability/logger.py`](file:///usr/local/google/home/sromiluyi/projects/ai-in-5-days-svr/app/observability/logger.py).

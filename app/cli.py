@@ -18,8 +18,7 @@ from typing import Any, Dict, List
 from app.agents.scorecard_agent import synthesize_exam_scorecard
 from app.config import config
 from app.mcp_server.canon_server import EXAM_RUBRIC, lookup_hunger_games_canon
-from app.memory.async_memory import memory_consolidator
-from app.memory.session_service import scorecard_db
+from app.db.gradebook import gradebook_db
 from app.models import CorrectnessEvaluation, QualityEvaluation
 from app.tools.anonymizer_tool import mask_student_identifiers, restore_student_identity_vault
 from app.tools.regrade_tools import apply_teacher_score_override, regrade_assessment_section
@@ -288,7 +287,7 @@ def run_interactive_cli() -> None:
             break
 
         elif lower == "show":
-            sc = scorecard_db.get_scorecard(scorecard.scorecard_id)
+            sc = gradebook_db.get_scorecard(scorecard.scorecard_id)
             if sc:
                 display_scorecard(sc)
 
@@ -303,12 +302,12 @@ def run_interactive_cli() -> None:
                 print(f"❌ {unmask_result.get('message')}")
 
         elif lower.startswith("hitl approve"):
-            sc = scorecard_db.get_scorecard(scorecard.scorecard_id)
+            sc = gradebook_db.get_scorecard(scorecard.scorecard_id)
             if sc:
                 sc.hitL_review.is_flagged = False
                 sc.hitL_review.teacher_decision = "APPROVED"
                 sc.hitL_review.teacher_notes = "Teacher confirmed flagged score via interactive CLI."
-                scorecard_db.save_scorecard(sc)
+                gradebook_db.save_scorecard(sc)
                 print(f"\n✅ Approved scorecard for {token}. Status updated.")
                 display_scorecard(sc)
 
@@ -325,7 +324,7 @@ def run_interactive_cli() -> None:
                 teacher_feedback=note,
             )
             print(f"\n{res.get('message')}")
-            sc = scorecard_db.get_scorecard(scorecard.scorecard_id)
+            sc = gradebook_db.get_scorecard(scorecard.scorecard_id)
             if sc:
                 display_scorecard(sc)
 
@@ -343,7 +342,7 @@ def run_interactive_cli() -> None:
                 justification=just,
             )
             print(f"\n{res.get('message')}")
-            sc = scorecard_db.get_scorecard(scorecard.scorecard_id)
+            sc = gradebook_db.get_scorecard(scorecard.scorecard_id)
             if sc:
                 display_scorecard(sc)
 

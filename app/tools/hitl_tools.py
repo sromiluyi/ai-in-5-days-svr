@@ -11,7 +11,7 @@ from typing import Any, Dict, List, Optional
 from google.adk.tools import ToolContext
 
 from app.config import config
-from app.memory.session_service import scorecard_db
+from app.db.gradebook import gradebook_db
 from app.models import AuditLogEntry, StudentScoreCard, ToolRecoveryResponse
 from app.observability.logger import log_intent, log_outcome
 
@@ -97,8 +97,8 @@ def finalize_student_grade_record(
         scorecard.hitL_review.teacher_decision = "APPROVED"
         scorecard.hitL_review.teacher_notes = "Auto-approved by assessment pipeline."
 
-        scorecard_db.save_scorecard(scorecard)
-        scorecard_db.append_audit_entry(
+        gradebook_db.save_scorecard(scorecard)
+        gradebook_db.append_audit_entry(
             scorecard.scorecard_id,
             AuditLogEntry(
                 action="INITIAL_ASSESSMENT",
@@ -166,8 +166,8 @@ def finalize_student_grade_record(
     if tool_context.tool_confirmation.confirmed:
         scorecard.hitL_review.teacher_decision = "APPROVED"
         scorecard.hitL_review.teacher_notes = "Confirmed by teacher via HITL hook."
-        scorecard_db.save_scorecard(scorecard)
-        scorecard_db.append_audit_entry(
+        gradebook_db.save_scorecard(scorecard)
+        gradebook_db.append_audit_entry(
             scorecard.scorecard_id,
             AuditLogEntry(
                 action="HITL_APPROVAL",
@@ -196,7 +196,7 @@ def finalize_student_grade_record(
     else:
         scorecard.hitL_review.teacher_decision = "REVISED"
         scorecard.hitL_review.teacher_notes = "Teacher requested revisions or adjustments."
-        scorecard_db.save_scorecard(scorecard)
+        gradebook_db.save_scorecard(scorecard)
 
         log_outcome(
             "HITLTool",

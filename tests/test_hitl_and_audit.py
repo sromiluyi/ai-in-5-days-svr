@@ -14,7 +14,7 @@ import pytest
 
 from app.agents.scorecard_agent import synthesize_exam_scorecard
 from app.cli import evaluate_submission_offline
-from app.memory.session_service import scorecard_db
+from app.db.gradebook import gradebook_db
 from app.tools.anonymizer_tool import mask_student_identifiers
 from app.tools.hitl_tools import check_hitl_triggers
 from app.tools.regrade_tools import apply_teacher_score_override, regrade_assessment_section
@@ -84,7 +84,7 @@ Berries and flowers on rue.
     assert regrade_res["new_score"] > initial_q1_score
 
     # Check updated scorecard in database
-    updated_sc = scorecard_db.get_scorecard(sc.scorecard_id)
+    updated_sc = gradebook_db.get_scorecard(sc.scorecard_id)
     assert updated_sc is not None
     assert updated_sc.total_score > initial_score
     assert len(updated_sc.audit_history) >= 1
@@ -120,7 +120,7 @@ Katniss volunteers for Prim.
     assert override_res["status"] == "success"
     assert override_res["new_score"] == 10.0
 
-    updated_sc = scorecard_db.get_scorecard(sc.scorecard_id)
+    updated_sc = gradebook_db.get_scorecard(sc.scorecard_id)
     assert updated_sc is not None
     assert updated_sc.question_scores[0].total_awarded == 10.0
     assert updated_sc.question_scores[0].teacher_override_applied is True

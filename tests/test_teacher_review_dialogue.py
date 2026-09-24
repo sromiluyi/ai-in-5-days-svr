@@ -19,7 +19,7 @@ from unittest.mock import AsyncMock, MagicMock
 from app.agents.coordinator_agent import coordinator_agent
 from app.agents.scorecard_agent import synthesize_exam_scorecard
 from app.cli import evaluate_submission_offline
-from app.memory.session_service import scorecard_db
+from app.db.gradebook import gradebook_db
 from app.models import StudentScoreCard
 from app.tools.anonymizer_tool import mask_student_identifiers
 from app.tools.regrade_tools import regrade_assessment_section
@@ -55,7 +55,7 @@ Berries trick.
     # Ensure it is flagged for review
     sc.hitL_review.is_flagged = True
     sc.hitL_review.flag_reasons = ["HIGH_HONORS_VERIFICATION: Score requires educator confirmation."]
-    scorecard_db.save_scorecard(sc)
+    gradebook_db.save_scorecard(sc)
     return token, sc
 
 
@@ -147,7 +147,7 @@ async def test_interactive_multi_turn_dialogue_with_regrade(flagged_submission_s
     assert "Question 2" in req_2.message
 
     # Verify database was updated
-    updated_sc = scorecard_db.get_scorecard(sc.scorecard_id)
+    updated_sc = gradebook_db.get_scorecard(sc.scorecard_id)
     assert updated_sc.total_score > initial_score
     assert any(a.action == "SECTION_REGRADE_DISPATCH" for a in updated_sc.audit_history)
 

@@ -42,8 +42,7 @@ from google.adk.workflow import START, Workflow, node
 from app.agents.coordinator_agent import coordinator_agent
 from app.agents.scorecard_agent import synthesize_exam_scorecard
 from app.cli import evaluate_submission_offline
-from app.config import config
-from app.memory.session_service import scorecard_db
+from app.db.gradebook import gradebook_db
 from app.models import AuditLogEntry, StudentScoreCard
 from app.observability.logger import log_intent, log_outcome
 from app.tools.anonymizer_tool import mask_student_identifiers, restore_student_identity_vault
@@ -300,10 +299,10 @@ async def teacher_review_node_func(ctx: Context, node_input: dict):
 
     # 1. Quick Approval / Finalize
     if user_text.lower() in ("yes", "y", "approve", "approved", "confirm", "confirmed", "finalize", "finalized", "looks good", "done"):
-        latest_sc = (scorecard_db.get_scorecard(scorecard_id) if scorecard_id else None) or StudentScoreCard.model_validate(scorecard_data)
+        latest_sc = (gradebook_db.get_scorecard(scorecard_id) if scorecard_id else None) or StudentScoreCard.model_validate(scorecard_data)
         latest_sc.hitL_review.teacher_decision = "TEACHER_CONFIRMED"
         latest_sc.hitL_review.teacher_notes = f"Teacher finalized and approved assessment (Final Score: {latest_sc.overall_percentage:.1f}%, Grade: {latest_sc.letter_grade})."
-        scorecard_db.save_scorecard(latest_sc)
+        gradebook_db.save_scorecard(latest_sc)
 
         unmask_result = restore_student_identity_vault(token, teacher_auth=True)
         student_name = (
@@ -341,10 +340,10 @@ async def teacher_review_node_func(ctx: Context, node_input: dict):
 
     # 2. Explicit Rejection
     if user_text.lower() in ("no", "reject", "rejected"):
-        latest_sc = (scorecard_db.get_scorecard(scorecard_id) if scorecard_id else None) or StudentScoreCard.model_validate(scorecard_data)
+        latest_sc = (gradebook_db.get_scorecard(scorecard_id) if scorecard_id else None) or StudentScoreCard.model_validate(scorecard_data)
         latest_sc.hitL_review.teacher_decision = "TEACHER_REJECTED"
         latest_sc.hitL_review.teacher_notes = "Teacher rejected assessment."
-        scorecard_db.save_scorecard(latest_sc)
+        gradebook_db.save_scorecard(latest_sc)
 
         unmask_result = restore_student_identity_vault(token, teacher_auth=True)
         student_name = unmask_result.get("student_name", "Student") if unmask_result.get("status") == "success" else "Student"
@@ -384,7 +383,7 @@ async def teacher_review_node_func(ctx: Context, node_input: dict):
     # Sync scorecard from state / db if regrade or override occurred
     updated_sc_dict = ctx.state.get("scorecard") or scorecard_data
     if scorecard_id:
-        db_sc = scorecard_db.get_scorecard(scorecard_id)
+        db_sc = gradebook_db.get_scorecard(scorecard_id)
         if db_sc:
             updated_sc_dict = db_sc.model_dump()
             ctx.state["scorecard"] = updated_sc_dict
