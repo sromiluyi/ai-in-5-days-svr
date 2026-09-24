@@ -69,12 +69,22 @@ def regrade_assessment_section(
             valid_options=valid_targets,
         ).model_dump()
 
-    scorecard = scorecard_db.get_scorecard(scorecard_id)
+    scorecard = None
+    if tool_context and hasattr(tool_context, "state") and "scorecard" in tool_context.state:
+        raw_sc = tool_context.state["scorecard"]
+        if isinstance(raw_sc, dict):
+            scorecard = StudentScoreCard.model_validate(raw_sc)
+        elif isinstance(raw_sc, StudentScoreCard):
+            scorecard = raw_sc
+
+    if not scorecard and scorecard_id:
+        scorecard = scorecard_db.get_scorecard(scorecard_id)
+
     if not scorecard:
         return ToolRecoveryResponse(
             error_code="SCORECARD_NOT_FOUND",
-            message=f"Scorecard with ID '{scorecard_id}' was not found in persistent store.",
-            recovery_guidance="Verify the scorecard_id from the initial grading run.",
+            message=f"Scorecard with ID '{scorecard_id}' was not found in session state or persistent store.",
+            recovery_guidance="Verify that a student scorecard exists in session state before requesting a regrade.",
         ).model_dump()
 
     # Find the target question
@@ -142,6 +152,8 @@ def regrade_assessment_section(
     scorecard.audit_history.append(audit_entry)
     scorecard_db.save_scorecard(scorecard)
     scorecard_db.append_audit_entry(scorecard.scorecard_id, audit_entry)
+    if tool_context and hasattr(tool_context, "state"):
+        tool_context.state["scorecard"] = scorecard.model_dump()
 
     log_outcome(
         "RegradeTool",
@@ -201,11 +213,21 @@ def apply_teacher_score_override(
             recovery_guidance="Please provide a justification explaining why this score was manually adjusted.",
         ).model_dump()
 
-    scorecard = scorecard_db.get_scorecard(scorecard_id)
+    scorecard = None
+    if tool_context and hasattr(tool_context, "state") and "scorecard" in tool_context.state:
+        raw_sc = tool_context.state["scorecard"]
+        if isinstance(raw_sc, dict):
+            scorecard = StudentScoreCard.model_validate(raw_sc)
+        elif isinstance(raw_sc, StudentScoreCard):
+            scorecard = raw_sc
+
+    if not scorecard and scorecard_id:
+        scorecard = scorecard_db.get_scorecard(scorecard_id)
+
     if not scorecard:
         return ToolRecoveryResponse(
             error_code="SCORECARD_NOT_FOUND",
-            message=f"Scorecard '{scorecard_id}' not found.",
+            message=f"Scorecard '{scorecard_id}' not found in session state or database.",
             recovery_guidance="Verify the scorecard ID.",
         ).model_dump()
 
@@ -285,6 +307,8 @@ def apply_teacher_score_override(
     scorecard.audit_history.append(audit_entry)
     scorecard_db.save_scorecard(scorecard)
     scorecard_db.append_audit_entry(scorecard.scorecard_id, audit_entry)
+    if tool_context and hasattr(tool_context, "state"):
+        tool_context.state["scorecard"] = scorecard.model_dump()
 
     log_outcome(
         "RegradeTool",

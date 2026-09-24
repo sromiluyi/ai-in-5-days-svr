@@ -13,8 +13,13 @@ import os
 import sys
 from pathlib import Path
 
-# Add project root to sys.path
+# Auto re-exec using project .venv if invoked from a different environment
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
+VENV_PYTHON = PROJECT_ROOT / ".venv" / "bin" / "python"
+if VENV_PYTHON.exists() and sys.executable != str(VENV_PYTHON):
+    os.execv(str(VENV_PYTHON), [str(VENV_PYTHON)] + sys.argv)
+
+# Add project root to sys.path
 sys.path.insert(0, str(PROJECT_ROOT))
 
 # Ensure Vertex AI environment variables are set

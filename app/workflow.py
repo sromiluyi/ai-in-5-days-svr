@@ -39,6 +39,7 @@ from google.adk.events.event import Event
 from google.adk.events.request_input import RequestInput
 from google.adk.workflow import START, Workflow, node
 
+from app.agents.coordinator_agent import handle_coordinator_dialogue_turn
 from app.agents.scorecard_agent import synthesize_exam_scorecard
 from app.cli import evaluate_submission_offline
 from app.config import config
@@ -65,15 +66,14 @@ def anonymize_submission_node(ctx: Context, node_input: Any) -> Event:
     if anon_result.get("status") == "error":
         token = "STUDENT_ANON_GENERAL"
         submission_data = {"student_name": "General Student", "student_id": "ANON", "answers": []}
-        ctx.state["student_token"] = token
         return Event(
             output={"student_token": token, "submission": submission_data, "evaluations": []},
+            state={"student_token": token, "submission": submission_data},
             message="Welcome to the Hunger Games Assessment Agent. Ready to evaluate student submissions.",
         )
 
     token = anon_result["student_token"]
     submission_data = anon_result["submission"]
-    ctx.state["student_token"] = token
 
     log_outcome(
         "WorkflowNode",
@@ -85,6 +85,7 @@ def anonymize_submission_node(ctx: Context, node_input: Any) -> Event:
 
     return Event(
         output={"student_token": token, "submission": submission_data},
+        state={"student_token": token, "submission": submission_data},
         message=f"🔒 PII Anonymized: Student masked to pseudonym '{token}'.",
     )
 
@@ -163,7 +164,6 @@ def synthesize_and_route_node(ctx: Context, node_input: dict) -> Event:
     log_intent("WorkflowNode", "SYNTHESIZE_SCORECARD", token, student_token=token)
     scorecard: StudentScoreCard = synthesize_exam_scorecard(token, eval_items)
     scorecard_dict = scorecard.model_dump()
-    ctx.state["scorecard"] = scorecard_dict
 
     # Check if flagged for Human-in-the-Loop review
     if scorecard.hitL_review.is_flagged:
@@ -177,6 +177,7 @@ def synthesize_and_route_node(ctx: Context, node_input: dict) -> Event:
         )
         return Event(
             output=scorecard_dict,
+            state={"scorecard": scorecard_dict, "student_token": token, "review_status": "FLAGGED_FOR_HITL"},
             route="review",
             message=(
                 f"🚨 [HITL REVIEW REQUIRED] Student {token} scored {scorecard.overall_percentage:.1f}% "
@@ -193,6 +194,7 @@ def synthesize_and_route_node(ctx: Context, node_input: dict) -> Event:
         )
         return Event(
             output=scorecard_dict,
+            state={"scorecard": scorecard_dict, "student_token": token, "review_status": "AUTO_APPROVED"},
             route="auto",
             message=(
                 f"✅ [AUTO APPROVED] Student {token} scored {scorecard.overall_percentage:.1f}% "
@@ -217,6 +219,7 @@ def auto_approve_node(ctx: Context, node_input: dict) -> Event:
         )
         return Event(
             output=node_input,
+            state={"review_status": "AUTO_APPROVED_RECORDED"},
             message=f"📋 Grade Finalized: {token} officially recorded as Grade [{grade}] ({score:.1f}%).",
         )
 
@@ -226,32 +229,48 @@ def auto_approve_node(ctx: Context, node_input: dict) -> Event:
     )
 
 
-@node(rerun_on_resume=True)
-async def teacher_review_node(ctx: Context, node_input: dict):
+async def teacher_review_node_func(ctx: Context, node_input: dict):
     """Handles Human-in-the-Loop review for flagged submissions.
 
-    Pauses execution via RequestInput asking the educator for confirmation or override.
-    When resumed with teacher decision, logs audit trail and unmasks student identity.
+    Allows back-and-forth teacher dialogue with the Coordinator Agent:
+    - Quick approval via 'yes' / 'approve'
+    - Asking questions about student answers, rubrics, or justifications
+    - Requesting targeted specialist regrading with pedagogical feedback
+    - Applying manual score overrides with structured audit logging
+    - Managing session conversation history across multiple turns
+    - Preserving bias-free pseudonym masking until final teacher sign-off
     """
     token = node_input.get("student_token", "UNKNOWN")
-    score = float(node_input.get("overall_percentage", 0.0))
-    grade = node_input.get("letter_grade", "N/A")
-    flag_reasons = node_input.get("hitL_review", {}).get("flag_reasons", [])
+    scorecard_id = node_input.get("scorecard_id")
+    turn = ctx.state.get("review_turn_count", 0)
+    chat_history: List[Dict[str, str]] = ctx.state.get("teacher_chat_history", [])
 
-    # Check if we already received teacher input upon resume
-    if not ctx.resume_inputs or "teacher_approval" not in ctx.resume_inputs:
+    # First turn: initial pause before any educator input
+    if not ctx.resume_inputs:
+        ctx.state["review_turn_count"] = 1
+        ctx.state["teacher_chat_history"] = []
+        score = float(node_input.get("overall_percentage", 0.0))
+        grade = node_input.get("letter_grade", "N/A")
+        flag_reasons = node_input.get("hitL_review", {}).get("flag_reasons", [])
+
         prompt_message = (
-            f"⚠️ Human-in-the-Loop Educator Review Required:\n"
-            f"- Student Token: {token}\n"
-            f"- Calculated Score: {score:.1f}% (Grade: {grade})\n"
-            f"- Trigger Reasons:\n  • " + "\n  • ".join(flag_reasons) + "\n\n"
-            f"Do you approve this assessment record? (yes / no / override <score>):"
+            f"⚠️ **Human-in-the-Loop Educator Review Required**:\n\n"
+            f"- **Student Token**: `{token}` *(Identity anonymized for bias-free review)*\n"
+            f"- **Calculated Score**: **{score:.1f}%** (Grade: **{grade}**)\n"
+            f"- **Trigger Reasons**:\n  • " + "\n  • ".join(flag_reasons) + "\n\n"
+            f"**Review Actions Available**:\n"
+            f"• **Approve**: Type `'approve'` or `'yes'` to finalize this grade as-is.\n"
+            f"• **Ask Questions**: e.g., *'Why did they lose points on Question 2?'* or *'Summarize their strengths.'*\n"
+            f"• **Targeted Regrade**: e.g., *'Regrade Q2 correctness with +2 points for IEP accommodation.'*\n"
+            f"• **Score Override**: e.g., *'Override Q4 total to 18: strong alternative thesis.'*\n"
+            f"• **Unmask**: Type *'unmask'* to reveal the student's real name.\n\n"
+            f"How would you like to proceed?"
         )
         log_outcome(
             "WorkflowNode",
             "TEACHER_REVIEW",
             "PAUSED_FOR_HITL",
-            f"Requesting teacher sign-off for token {token}",
+            f"Requesting teacher review dialogue for token {token}",
             student_token=token,
         )
         yield RequestInput(
@@ -260,56 +279,117 @@ async def teacher_review_node(ctx: Context, node_input: dict):
         )
         return
 
-    # Process teacher decision upon resumption
-    raw_decision = ctx.resume_inputs.get("teacher_approval")
+    # Extract user input from resume inputs
+    current_key = f"teacher_dialogue_{turn}"
+    raw_decision = None
+    for k in [current_key, f"teacher_dialogue_{turn - 1}", "teacher_approval", *ctx.resume_inputs.keys()]:
+        if k in ctx.resume_inputs:
+            raw_decision = ctx.resume_inputs[k]
+            break
+
     if isinstance(raw_decision, dict):
-        raw_decision = (
+        user_text = str(
             raw_decision.get("response")
             or raw_decision.get("decision")
-            or str(raw_decision)
-        )
-    decision_str = str(raw_decision).strip().lower()
-
-    now_utc = datetime.datetime.now(ZoneInfo("UTC")).isoformat()
-    audit_action = "TEACHER_APPROVAL"
-    audit_notes = f"Teacher reviewed and approved score of {score:.1f}%."
-
-    if decision_str in ("yes", "y", "approve", "approved"):
-        is_approved = True
-        status = "TEACHER_CONFIRMED"
+            or raw_decision.get("teacher_approval")
+            or raw_decision
+        ).strip()
     else:
-        is_approved = False
-        status = "TEACHER_REJECTED"
-        audit_action = "TEACHER_REJECTION"
-        audit_notes = f"Teacher rejected assessment: '{decision_str}'."
+        user_text = str(raw_decision or "").strip()
 
-    # Update scorecard record
-    node_input["hitL_review"]["teacher_decision"] = status
-    node_input["hitL_review"]["teacher_notes"] = audit_notes
+    # 1. Quick Approval / Finalize
+    if user_text.lower() in ("yes", "y", "approve", "approved", "confirm", "confirmed", "finalize", "finalized", "looks good", "done"):
+        latest_sc = (scorecard_db.get_scorecard(scorecard_id) if scorecard_id else None) or StudentScoreCard.model_validate(node_input)
+        latest_sc.hitL_review.teacher_decision = "TEACHER_CONFIRMED"
+        latest_sc.hitL_review.teacher_notes = f"Teacher finalized and approved assessment (Final Score: {latest_sc.overall_percentage:.1f}%, Grade: {latest_sc.letter_grade})."
+        scorecard_db.save_scorecard(latest_sc)
 
-    # Unmask student identity upon teacher review completion
-    unmask_result = restore_student_identity_vault(token)
-    student_name = (
-        unmask_result.get("student_name", "Student")
-        if unmask_result.get("status") == "success"
-        else "Student"
-    )
+        unmask_result = restore_student_identity_vault(token, teacher_auth=True)
+        student_name = (
+            unmask_result.get("student_name", "Student")
+            if unmask_result.get("status") == "success"
+            else "Student"
+        )
+        student_id_val = unmask_result.get("student_id", "N/A") if unmask_result.get("status") == "success" else "N/A"
 
-    log_outcome(
-        "WorkflowNode",
-        "TEACHER_REVIEW",
-        status,
-        f"Teacher decision '{decision_str}' applied to token {token} ({student_name})",
+        final_dict = latest_sc.model_dump()
+        final_dict["student_name"] = student_name
+        final_dict["student_id"] = student_id_val
+
+        log_outcome(
+            "WorkflowNode",
+            "TEACHER_REVIEW",
+            "TEACHER_CONFIRMED",
+            f"Review finalized for {token} ({student_name}) with {latest_sc.overall_percentage:.1f}% ({latest_sc.letter_grade})",
+            student_token=token,
+        )
+
+        yield Event(
+            output=final_dict,
+            message=(
+                f"✅ **Assessment Review Finalized**\n\n"
+                f"- **Student**: **{student_name}** (`{student_id_val}`)\n"
+                f"- **Token**: `{token}`\n"
+                f"- **Final Score**: **{latest_sc.overall_percentage:.1f}%** (Grade: **{latest_sc.letter_grade}**)\n"
+                f"- **Audit Trail**: All teacher adjustments and sign-offs permanently recorded.\n"
+                f"- **Total Questions**: {len(latest_sc.question_scores)} assessed."
+            ),
+        )
+        return
+
+    # 2. Explicit Rejection
+    if user_text.lower() in ("no", "reject", "rejected"):
+        latest_sc = (scorecard_db.get_scorecard(scorecard_id) if scorecard_id else None) or StudentScoreCard.model_validate(node_input)
+        latest_sc.hitL_review.teacher_decision = "TEACHER_REJECTED"
+        latest_sc.hitL_review.teacher_notes = "Teacher rejected assessment."
+        scorecard_db.save_scorecard(latest_sc)
+
+        unmask_result = restore_student_identity_vault(token, teacher_auth=True)
+        student_name = unmask_result.get("student_name", "Student") if unmask_result.get("status") == "success" else "Student"
+
+        yield Event(
+            output=latest_sc.model_dump(),
+            message=f"❌ Assessment Review: {token} ({student_name}) marked as TEACHER_REJECTED.",
+        )
+        return
+
+    # 3. Interactive Dialogue Turn (Questions, Regrades, Overrides)
+    chat_history.append({"role": "teacher", "content": user_text})
+
+    dialogue_res = await handle_coordinator_dialogue_turn(
+        scorecard_id=scorecard_id,
         student_token=token,
+        teacher_input=user_text,
+        chat_history=chat_history,
+        fallback_scorecard=node_input,
     )
 
-    yield Event(
-        output=node_input,
-        message=(
-            f"{'✅' if is_approved else '❌'} Assessment Review Complete: {token} ({student_name}) "
-            f"was marked as {status} (Decision: '{decision_str}')."
-        ),
+    agent_reply = dialogue_res["reply"]
+    latest_scorecard_data = dialogue_res.get("scorecard_data") or {}
+
+    node_input.update(latest_scorecard_data)
+    chat_history.append({"role": "coordinator", "content": agent_reply})
+    ctx.state["teacher_chat_history"] = chat_history
+    ctx.state["review_turn_count"] = turn + 1
+
+    next_interrupt = f"teacher_dialogue_{turn + 1}"
+    follow_up_prompt = (
+        f"{agent_reply}\n\n"
+        f"---\n"
+        f"💬 **Teacher Review Dialogue (Turn {turn + 1})**:\n"
+        f"• Ask another question about student answers or rubrics.\n"
+        f"• Request another regrade or score override.\n"
+        f"• Type **'approve'** when you are ready to finalize and record this grade."
     )
+
+    yield RequestInput(
+        interrupt_id=next_interrupt,
+        message=follow_up_prompt,
+    )
+
+
+# Wrapped Node for Workflow Graph
+teacher_review_node = node(rerun_on_resume=True)(teacher_review_node_func)
 
 
 # -----------------------------------------------------------------------------
